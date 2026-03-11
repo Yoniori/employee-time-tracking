@@ -1,5 +1,7 @@
 import { auth } from './firebase';
 
+const BASE = import.meta.env.VITE_API_URL ?? '';
+
 async function getToken() {
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
@@ -8,7 +10,7 @@ async function getToken() {
 
 async function request(path, options = {}) {
   const token = await getToken();
-  const res = await fetch(path, {
+  const res = await fetch(BASE + path, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -57,7 +59,7 @@ export const api = {
     const token = await getToken();
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch('/api/employees/upload-csv', {
+    const res = await fetch(`${BASE}/api/employees/upload-csv`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: formData,
@@ -69,7 +71,7 @@ export const api = {
 
   // Auth
   lookupEmployee: (idNumber) =>
-    fetch('/api/auth/lookup-employee', {
+    fetch(`${BASE}/api/auth/lookup-employee`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idNumber }),
@@ -80,7 +82,7 @@ export const api = {
     }),
 
   seedData: () =>
-    fetch('/api/auth/seed-manager', { method: 'POST' }).then(r => r.json()),
+    fetch(`${BASE}/api/auth/seed-manager`, { method: 'POST' }).then(r => r.json()),
 
   // Sheets
   syncSheets: (spreadsheetId) =>

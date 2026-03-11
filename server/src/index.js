@@ -3,7 +3,13 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'] }));
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'https://employee-time-tracking-tau.vercel.app',
+  ...(process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : []),
+];
+app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
 // Routes
