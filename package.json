@@ -1,0 +1,11 @@
+{
+  "name": "time-tracking-pwa",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server/src/index.js",
+    "install:server": "npm install --prefix server"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
