@@ -3,11 +3,9 @@ const router = express.Router();
 const { google } = require('googleapis');
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
-const serviceAccount = require('../../serviceAccount.json');
-
 async function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({
-    credentials: serviceAccount,
+    credentials: JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
   return google.sheets({ version: 'v4', auth });
