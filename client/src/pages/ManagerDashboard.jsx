@@ -276,8 +276,10 @@ function EmployeesTab() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', idNumber: '', phone: '', workSite: '', lat: '', lng: '' });
+  const [form, setForm] = useState({ name: '', idNumber: '', phone: '', workSite: '', address: '' });
   const [formError, setFormError] = useState('');
+  const [geocodeResult, setGeocodeResult] = useState(null);
+  const [geocoding, setGeocoding] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
 
   useEffect(() => { loadEmployees(); }, []);
@@ -294,18 +296,41 @@ function EmployeesTab() {
     }
   }
 
+  async function geocodeAddress(address) {
+    setGeocoding(true);
+    setGeocodeResult(null);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'he' } });
+      const data = await res.json();
+      if (!data.length) throw new Error('הכתובת לא נמצאה, נסה כתובת מדויקת יותר');
+      const { lat, lon, display_name } = data[0];
+      const result = { lat: parseFloat(lat), lng: parseFloat(lon), display_name };
+      setGeocodeResult(result);
+      return result;
+    } finally {
+      setGeocoding(false);
+    }
+  }
+
   async function handleCreate(e) {
     e.preventDefault();
     setFormError('');
     if (!/^\d{9}$/.test(form.idNumber)) { setFormError('תעודת זהות חייבת להיות 9 ספרות'); return; }
     try {
+      const geo = geocodeResult || await geocodeAddress(form.address);
       await api.createEmployee({
-        ...form,
-        location: { lat: parseFloat(form.lat) || 0, lng: parseFloat(form.lng) || 0 },
+        name: form.name,
+        idNumber: form.idNumber,
+        phone: form.phone,
+        workSite: form.workSite,
+        address: form.address,
+        location: { lat: geo.lat, lng: geo.lng },
         allowedRadius: 200,
         active: true,
       });
-      setForm({ name: '', idNumber: '', phone: '', workSite: '', lat: '', lng: '' });
+      setForm({ name: '', idNumber: '', phone: '', workSite: '', address: '' });
+      setGeocodeResult(null);
       setShowForm(false);
       loadEmployees();
     } catch (err) {
@@ -365,14 +390,28 @@ function EmployeesTab() {
             <input value={form.workSite} onChange={e => setForm(f => ({ ...f, workSite: e.target.value }))}
               placeholder="אתר עבודה" required
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <div className="grid grid-cols-2 gap-2">
-              <input value={form.lat} onChange={e => setForm(f => ({ ...f, lat: e.target.value }))}
-                placeholder="קו רוחב" type="number" step="any"
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input value={form.lng} onChange={e => setForm(f => ({ ...f, lng: e.target.value }))}
-                placeholder="קו אורך" type="number" step="any"
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            <div className="flex gap-2">
+              <input
+                value={form.address}
+                onChange={e => { setForm(f => ({ ...f, address: e.target.value })); setGeocodeResult(null); }}
+                placeholder="כתובת מיקום העבודה" required
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => geocodeAddress(form.address)}
+                disabled={geocoding || !form.address}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-3 py-2 text-sm disabled:opacity-40 whitespace-nowrap"
+              >
+                {geocoding ? '...' : '📍 אמת'}
+              </button>
             </div>
+            {geocodeResult && (
+              <p className="text-xs text-green-600 bg-green-50 rounded-lg px-3 py-2">
+                ✓ {geocodeResult.display_name}<br />
+                <span className="text-gray-400">({geocodeResult.lat.toFixed(5)}, {geocodeResult.lng.toFixed(5)})</span>
+              </p>
+            )}
             {formError && <p className="text-red-500 text-sm">{formError}</p>}
             <div className="flex gap-2">
               <button type="submit" className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium">שמור</button>
