@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  direction: rtl;
+  font-family: 'Rubik', Arial, sans-serif;
+  background-color: #f8fafc;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+input, button, select, textarea {
+  font-family: inherit;
+}
+
+/* OTP input style */
+.otp-input {
+  text-align: center;
+  letter-spacing: 0.5rem;
+  font-size: 1.5rem;
+}

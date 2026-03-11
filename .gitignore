@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+server/serviceAccount.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Vite
+*.local
+
+# PWA
+dev-dist/
