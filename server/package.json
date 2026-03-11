@@ -4,7 +4,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "seed": "node scripts/seedAdmin.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
