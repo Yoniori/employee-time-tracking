@@ -5,6 +5,15 @@ const { parse } = require('csv-parse/sync');
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 
+function normalizePhone(phone) {
+  if (!phone) return phone;
+  const digits = phone.replace(/[\s\-().]/g, '');
+  if (digits.startsWith('+')) return digits;
+  if (digits.startsWith('972')) return '+' + digits;
+  if (digits.startsWith('0')) return '+972' + digits.slice(1);
+  return '+972' + digits;
+}
+
 const upload = multer({ storage: multer.memoryStorage() });
 
 // GET all employees (manager only)
@@ -22,6 +31,7 @@ router.get('/', verifyToken, async (req, res) => {
 router.post('/', verifyToken, async (req, res) => {
   try {
     const data = { ...req.body, active: true, createdAt: new Date() };
+    if (data.phone) data.phone = normalizePhone(data.phone);
     const ref = await db.collection('employees').add(data);
     res.json({ id: ref.id, ...data });
   } catch (err) {
@@ -32,7 +42,9 @@ router.post('/', verifyToken, async (req, res) => {
 // PUT update employee
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    await db.collection('employees').doc(req.params.id).update(req.body);
+    const data = { ...req.body };
+    if (data.phone) data.phone = normalizePhone(data.phone);
+    await db.collection('employees').doc(req.params.id).update(data);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -62,7 +74,7 @@ router.post('/upload-csv', verifyToken, upload.single('file'), async (req, res) 
     for (const row of records) {
       const name = row['שם'] || row['name'];
       const idNumber = row['תעודת_זהות'] || row['idNumber'];
-      const phone = row['מספר_טלפון'] || row['phone'];
+      const phone = normalizePhone(row['מספר_טלפון'] || row['phone']);
       const workSite = row['אתר_עבודה'] || row['workSite'];
       const lat = parseFloat(row['קו_רוחב'] || row['lat'] || 0);
       const lng = parseFloat(row['קו_אורך'] || row['lng'] || 0);

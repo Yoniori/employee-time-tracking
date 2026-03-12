@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const { db, auth } = require('../firebase');
 
+// Normalize any Israeli phone number to E.164 (+972...)
+function normalizePhone(phone) {
+  if (!phone) return phone;
+  const digits = phone.replace(/[\s\-().]/g, '');
+  if (digits.startsWith('+')) return digits;           // already E.164
+  if (digits.startsWith('972')) return '+' + digits;   // 972501234567
+  if (digits.startsWith('0')) return '+972' + digits.slice(1); // 0501234567
+  return '+972' + digits;                              // bare digits
+}
+
 // Lookup employee by ID number, return phone for OTP
 router.post('/lookup-employee', async (req, res) => {
   const { idNumber } = req.body;
@@ -18,7 +28,7 @@ router.post('/lookup-employee', async (req, res) => {
       return res.status(404).json({ error: 'עובד לא נמצא במערכת' });
     }
     const employee = { id: snap.docs[0].id, ...snap.docs[0].data() };
-    res.json({ phone: employee.phone, name: employee.name, employeeId: employee.id });
+    res.json({ phone: normalizePhone(employee.phone), name: employee.name, employeeId: employee.id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'שגיאת שרת' });
