@@ -147,7 +147,13 @@ export default function EmployeeLogin() {
           {step === 'otp' && (
             <>
               <button
-                onClick={() => { setStep('id'); setError(''); setOtp(''); }}
+                onClick={() => {
+                  setStep('id'); setError(''); setOtp('');
+                  if (recaptchaVerifierRef.current) {
+                    recaptchaVerifierRef.current.clear();
+                    recaptchaVerifierRef.current = null;
+                  }
+                }}
                 className="text-blue-500 text-sm mb-4 flex items-center gap-1"
               >
                 ← חזור
