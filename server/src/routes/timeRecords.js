@@ -31,10 +31,18 @@ router.post('/clock-in', verifyToken, async (req, res) => {
     }
 
     // Location verification
+    if (!emp.location?.lat || !emp.location?.lng) {
+      return res.status(400).json({ error: 'לא הוגדר מיקום לאתר העבודה - פנה למנהל' });
+    }
+    const allowed = emp.allowedRadius || 200;
     const distance = haversineDistance(lat, lng, emp.location.lat, emp.location.lng);
-    const locationVerified = distance <= (emp.allowedRadius || 200);
+    const locationVerified = distance <= allowed;
     if (!locationVerified) {
-      return res.status(403).json({ error: 'אינך נמצא במיקום העבודה', distance: Math.round(distance) });
+      return res.status(403).json({
+        error: `אינך נמצא במיקום העבודה (${Math.round(distance)} מ' מהאתר, מותר עד ${allowed} מ')`,
+        distance: Math.round(distance),
+        allowed,
+      });
     }
 
     const now = new Date();
