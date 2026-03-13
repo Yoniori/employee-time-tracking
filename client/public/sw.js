@@ -1,4 +1,4 @@
-const CACHE_NAME = 'time-tracking-v3';
+const CACHE_NAME = 'time-tracking-v4';
 
 // Only cache immutable hashed assets - never cache index.html
 const IMMUTABLE_PATTERN = /\/assets\/.+\.(js|css|woff2?|png|svg|ico)$/;
