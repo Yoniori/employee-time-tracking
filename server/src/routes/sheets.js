@@ -3,6 +3,7 @@ const router = express.Router();
 const { google } = require('googleapis');
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
+const requireManager = require('../middleware/requireManager');
 async function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({
     credentials: JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT),
@@ -12,7 +13,7 @@ async function getSheetsClient() {
 }
 
 // POST sync unsynced records to Google Sheets
-router.post('/sync', verifyToken, async (req, res) => {
+router.post('/sync', verifyToken, requireManager, async (req, res) => {
   const { spreadsheetId } = req.body;
   if (!spreadsheetId) return res.status(400).json({ error: 'spreadsheetId required' });
 

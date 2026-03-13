@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { rateLimit } = require('express-rate-limit');
 
 const app = express();
 const ALLOWED_ORIGINS = [
@@ -11,6 +12,16 @@ const ALLOWED_ORIGINS = [
 ];
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
+
+// Rate limit: employee ID lookup — prevents enumeration attacks
+const lookupLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'יותר מדי ניסיונות - נסה שוב בעוד דקה' },
+});
+app.use('/api/auth/lookup-employee', lookupLimiter);
 
 // Routes
 app.use('/api/employees', require('./routes/employees'));

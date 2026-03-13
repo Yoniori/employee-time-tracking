@@ -4,6 +4,7 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
+const requireManager = require('../middleware/requireManager');
 
 function normalizePhone(phone) {
   if (!phone) return phone;
@@ -17,7 +18,7 @@ function normalizePhone(phone) {
 const upload = multer({ storage: multer.memoryStorage() });
 
 // GET all employees (manager only)
-router.get('/', verifyToken, async (req, res) => {
+router.get('/', verifyToken, requireManager, async (req, res) => {
   try {
     const snap = await db.collection('employees').orderBy('name').get();
     const employees = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -28,7 +29,7 @@ router.get('/', verifyToken, async (req, res) => {
 });
 
 // POST create employee
-router.post('/', verifyToken, async (req, res) => {
+router.post('/', verifyToken, requireManager, async (req, res) => {
   try {
     const data = { ...req.body, active: true, createdAt: new Date() };
     if (data.phone) data.phone = normalizePhone(data.phone);
@@ -40,7 +41,7 @@ router.post('/', verifyToken, async (req, res) => {
 });
 
 // PUT update employee
-router.put('/:id', verifyToken, async (req, res) => {
+router.put('/:id', verifyToken, requireManager, async (req, res) => {
   try {
     const data = { ...req.body };
     if (data.phone) data.phone = normalizePhone(data.phone);
@@ -52,7 +53,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 });
 
 // DELETE (deactivate) employee
-router.delete('/:id', verifyToken, async (req, res) => {
+router.delete('/:id', verifyToken, requireManager, async (req, res) => {
   try {
     await db.collection('employees').doc(req.params.id).update({ active: false });
     res.json({ success: true });
@@ -63,7 +64,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
 // POST CSV upload
 // CSV format: שם,תעודת_זהות,מספר_טלפון,אתר_עבודה,קו_רוחב,קו_אורך
-router.post('/upload-csv', verifyToken, upload.single('file'), async (req, res) => {
+router.post('/upload-csv', verifyToken, requireManager, upload.single('file'), async (req, res) => {
   try {
     const content = req.file.buffer.toString('utf-8');
     const records = parse(content, { columns: true, skip_empty_lines: true, trim: true });

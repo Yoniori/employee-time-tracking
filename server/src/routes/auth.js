@@ -35,8 +35,11 @@ router.post('/lookup-employee', async (req, res) => {
   }
 });
 
-// Seed manager account (one-time setup)
+// Seed manager account (one-time setup — disabled in production)
 router.post('/seed-manager', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
   try {
     let userRecord;
     try {
