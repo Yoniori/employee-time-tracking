@@ -64,8 +64,11 @@ export default function EmployeeDashboard() {
   const [clockInTime, setClockInTime] = useState(null);
   const [recordId, setRecordId] = useState(null);
   const [loading, setLoading] = useState(false);
+  // 'gps' = locating, 'saving' = writing to server
+  const [loadingStep, setLoadingStep] = useState('gps');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [flashSuccess, setFlashSuccess] = useState(false);
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -104,15 +107,19 @@ export default function EmployeeDashboard() {
 
   async function handleClockIn() {
     setLoading(true);
+    setLoadingStep('gps');
     setError('');
     setSuccess('');
     try {
       const pos = await getPosition();
+      setLoadingStep('saving');
       const result = await api.clockIn(employeeData.employeeId, pos.lat, pos.lng);
       setClockedIn(true);
       setClockInTime(new Date(result.clockIn));
       setRecordId(result.recordId);
       setSuccess('כניסה נרשמה בהצלחה!');
+      setFlashSuccess(true);
+      setTimeout(() => setFlashSuccess(false), 1200);
     } catch (err) {
       setError(err.message || 'שגיאה ברישום כניסה');
     } finally {
@@ -122,16 +129,18 @@ export default function EmployeeDashboard() {
 
   async function handleClockOut() {
     setLoading(true);
+    setLoadingStep('gps');
     setError('');
     setSuccess('');
     try {
       const pos = await getPosition();
+      setLoadingStep('saving');
       const result = await api.clockOut(employeeData.employeeId, pos.lat, pos.lng);
       setClockedIn(false);
       setClockInTime(null);
       setRecordId(null);
       const hours = result.totalHours?.toFixed(2);
-      setSuccess(`יציאה נרשמה! עבדת ${hours} שעות`);
+      setSuccess(`יציאה נרשמה בהצלחה! סה"כ ${hours} שעות`);
     } catch (err) {
       setError(err.message || 'שגיאה ברישום יציאה');
     } finally {
@@ -208,23 +217,24 @@ export default function EmployeeDashboard() {
           </p>
         </div>
 
-        {/* Status card */}
+        {/* Status card — flashes white briefly on successful clock-in */}
         <div className={`rounded-3xl p-5 mb-4 transition-all duration-500
-          ${clockedIn
-            ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200'
-            : 'bg-white text-gray-700 shadow-sm'}`}
+          ${flashSuccess ? 'bg-white scale-[1.02]' :
+            clockedIn
+              ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200'
+              : 'bg-white text-gray-700 shadow-sm'}`}
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className={`text-xs font-semibold mb-0.5 ${clockedIn ? 'text-emerald-100' : 'text-gray-400'}`}>
+              <p className={`text-xs font-semibold mb-0.5 ${clockedIn && !flashSuccess ? 'text-emerald-100' : 'text-gray-400'}`}>
                 סטטוס נוכחות
               </p>
-              <p className={`text-xl font-bold ${clockedIn ? 'text-white' : 'text-gray-600'}`}>
-                {clockedIn ? 'נוכח במשמרת' : 'לא מחויב'}
+              <p className={`text-xl font-bold ${clockedIn && !flashSuccess ? 'text-white' : 'text-gray-600'}`}>
+                {clockedIn ? 'נוכח במשמרת ✓' : 'טרם נרשמה כניסה'}
               </p>
             </div>
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center
-              ${clockedIn ? 'bg-white/20' : 'bg-gray-100'}`}>
+              ${clockedIn && !flashSuccess ? 'bg-white/20' : 'bg-gray-100'}`}>
               {clockedIn ? (
                 <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
@@ -239,7 +249,7 @@ export default function EmployeeDashboard() {
             </div>
           </div>
 
-          {clockedIn && clockInTime && (
+          {clockedIn && clockInTime && !flashSuccess && (
             <div className="mt-4 pt-4 border-t border-white/20">
               <div className="flex items-center justify-between">
                 <div>
@@ -261,13 +271,13 @@ export default function EmployeeDashboard() {
 
         {/* Toast messages */}
         {success && (
-          <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 mb-4 animate-pulse-once">
+          <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 mb-4">
             <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
               <svg className="w-4 h-4 text-white" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
             </div>
-            <p className="text-emerald-700 font-medium text-sm">{success}</p>
+            <p className="text-emerald-700 font-medium text-sm flex-1">{success}</p>
           </div>
         )}
         {error && (
@@ -277,7 +287,12 @@ export default function EmployeeDashboard() {
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
             </div>
-            <p className="text-red-600 text-sm">{error}</p>
+            <p className="text-red-600 text-sm flex-1">{error}</p>
+            <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 shrink-0 p-1">
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
           </div>
         )}
         {gpsError && (
@@ -287,54 +302,59 @@ export default function EmployeeDashboard() {
                 <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
               </svg>
             </div>
-            <p className="text-amber-700 text-sm">{gpsError}</p>
+            <p className="text-amber-700 text-sm flex-1">{gpsError}</p>
           </div>
         )}
 
-        {/* Clock In/Out button */}
-        <button
-          onClick={clockedIn ? handleClockOut : handleClockIn}
-          disabled={busy}
-          className="w-full rounded-3xl py-5 font-bold text-lg transition-all active:scale-[0.97]
-            disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 shadow-lg"
-          style={{
-            background: busy
-              ? '#e5e7eb'
-              : clockedIn
-              ? 'linear-gradient(135deg, #ef4444, #f97316)'
-              : 'linear-gradient(135deg, #4f46e5, #6366f1)',
-            color: busy ? '#9ca3af' : 'white',
-            boxShadow: busy ? 'none' : clockedIn
-              ? '0 8px 24px rgba(239,68,68,0.35)'
-              : '0 8px 24px rgba(79,70,229,0.35)',
-          }}
-        >
-          {busy ? (
-            <><Spinner className="h-5 w-5" /> {gpsLoading ? 'מאתר מיקום...' : 'מעבד...'}</>
-          ) : clockedIn ? (
-            <>
-              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-              רישום יציאה
-            </>
-          ) : (
-            <>
-              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 8v4l3 3" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              רישום כניסה
-            </>
-          )}
-        </button>
+        {/* Clock In/Out button — pulses when idle and not clocked in */}
+        <div className={`relative rounded-3xl ${!busy && !clockedIn ? 'ring-4 ring-indigo-200 ring-offset-2 ring-offset-[#F4F5FF] animate-pulse' : ''}`}>
+          <button
+            onClick={clockedIn ? handleClockOut : handleClockIn}
+            disabled={busy}
+            className="w-full rounded-3xl py-6 font-bold text-lg transition-all active:scale-[0.97]
+              disabled:cursor-not-allowed flex items-center justify-center gap-3"
+            style={{
+              background: busy
+                ? '#e5e7eb'
+                : clockedIn
+                ? 'linear-gradient(135deg, #ef4444, #f97316)'
+                : 'linear-gradient(135deg, #4f46e5, #6366f1)',
+              color: busy ? '#9ca3af' : 'white',
+              boxShadow: busy ? 'none' : clockedIn
+                ? '0 8px 24px rgba(239,68,68,0.35)'
+                : '0 8px 24px rgba(79,70,229,0.40)',
+            }}
+          >
+            {busy ? (
+              <>
+                <Spinner className="h-5 w-5" />
+                {loadingStep === 'gps' ? 'מאתר מיקום GPS...' : 'רושם נוכחות...'}
+              </>
+            ) : clockedIn ? (
+              <>
+                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+                רישום יציאה מהעבודה
+              </>
+            ) : (
+              <>
+                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 8v4l3 3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                רישום כניסה לעבודה
+              </>
+            )}
+          </button>
+        </div>
 
         <p className="text-xs text-gray-400 text-center mt-3">
           {busy
-            ? 'אנא המתן...'
+            ? loadingStep === 'gps' ? 'ממתין לאישור מיקום...' : 'שומר נתונים...'
             : clockedIn
-            ? 'לחץ לרישום יציאה מהעבודה'
-            : 'לחץ לרישום כניסה לעבודה'}
+            ? 'לחץ בסיום המשמרת לרישום יציאה'
+            : 'לחץ לרישום תחילת המשמרת'}
         </p>
       </div>
     </div>
