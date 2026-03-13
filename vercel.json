@@ -1,5 +1,1 @@
-{
-  "buildCommand": "cd client && npm install && npm run build",
-  "outputDirectory": "client/dist",
-  "rewrites": [{ "source": "/((?!assets|favicon\\.ico|manifest\\.json|sw\\.js).*)", "destination": "/index.html" }]
-}
+{}
