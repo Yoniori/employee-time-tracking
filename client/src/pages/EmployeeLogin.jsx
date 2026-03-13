@@ -1,17 +1,79 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-} from 'firebase/auth';
+import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { api } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 
+function Spinner() {
+  return (
+    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+    </svg>
+  );
+}
+
+function OtpBoxes({ value, onChange }) {
+  const refs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
+  const digits = value.split('');
+
+  function handleKey(i, e) {
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      const next = digits.slice();
+      if (next[i]) {
+        next[i] = '';
+      } else if (i > 0) {
+        next[i - 1] = '';
+        refs[i - 1].current?.focus();
+      }
+      onChange(next.join(''));
+    }
+  }
+
+  function handleChange(i, e) {
+    const char = e.target.value.replace(/\D/g, '').slice(-1);
+    const next = digits.slice();
+    next[i] = char;
+    onChange(next.join(''));
+    if (char && i < 5) refs[i + 1].current?.focus();
+  }
+
+  function handlePaste(e) {
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    onChange(pasted.padEnd(6, '').slice(0, 6).trimEnd());
+    if (pasted.length > 0) refs[Math.min(pasted.length, 5)].current?.focus();
+    e.preventDefault();
+  }
+
+  return (
+    <div className="flex gap-2 justify-center" dir="ltr">
+      {[0, 1, 2, 3, 4, 5].map(i => (
+        <input
+          key={i}
+          ref={refs[i]}
+          type="tel"
+          inputMode="numeric"
+          maxLength={1}
+          value={digits[i] || ''}
+          onChange={e => handleChange(i, e)}
+          onKeyDown={e => handleKey(i, e)}
+          onPaste={handlePaste}
+          autoFocus={i === 0}
+          className="w-11 h-14 text-center text-2xl font-bold border-2 rounded-xl
+            border-gray-200 focus:border-indigo-500 focus:outline-none
+            transition-colors bg-gray-50 focus:bg-white"
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function EmployeeLogin() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [step, setStep] = useState('id'); // 'id' | 'otp'
+  const [step, setStep] = useState('id');
   const [idNumber, setIdNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [employeeInfo, setEmployeeInfo] = useState(null);
@@ -71,7 +133,6 @@ export default function EmployeeLogin() {
     setError('');
     try {
       await confirmResult.confirm(otp);
-      // Store employee data in sessionStorage for use in dashboard
       sessionStorage.setItem('employeeData', JSON.stringify(employeeInfo));
       navigate('/dashboard', { replace: true });
     } catch {
@@ -81,27 +142,53 @@ export default function EmployeeLogin() {
     }
   }
 
+  function goBack() {
+    setStep('id');
+    setError('');
+    setOtp('');
+    if (recaptchaVerifierRef.current) {
+      recaptchaVerifierRef.current.clear();
+      recaptchaVerifierRef.current = null;
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-600 to-blue-800 flex flex-col items-center justify-center p-4">
-      <div id="recaptcha-container" ref={recaptchaRef}></div>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center p-4"
+      style={{ background: 'linear-gradient(135deg, #3730a3 0%, #4f46e5 50%, #6366f1 100%)' }}
+    >
+      <div id="recaptcha-container" ref={recaptchaRef} />
 
       <div className="w-full max-w-sm">
-        {/* Logo / Header */}
+        {/* Brand */}
         <div className="text-center mb-8">
-          <div className="text-6xl mb-4">⏱️</div>
-          <h1 className="text-3xl font-bold text-white">מעקב שעות</h1>
-          <p className="text-blue-200 mt-1">מערכת נוכחות עובדים</p>
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/20 backdrop-blur mb-4 shadow-lg">
+            <svg className="w-9 h-9 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">מעקב שעות</h1>
+          <p className="text-indigo-200 mt-1 text-sm">מערכת נוכחות עובדים</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl p-6">
+        {/* Step indicator */}
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <div className={`h-2 rounded-full transition-all duration-300 ${step === 'id' ? 'w-8 bg-white' : 'w-2 bg-white/40'}`} />
+          <div className={`h-2 rounded-full transition-all duration-300 ${step === 'otp' ? 'w-8 bg-white' : 'w-2 bg-white/40'}`} />
+        </div>
+
+        {/* Card */}
+        <div className="bg-white rounded-3xl shadow-2xl p-7">
+
           {step === 'id' && (
             <>
-              <h2 className="text-xl font-semibold text-gray-800 mb-6 text-center">
-                כניסה לעובד
-              </h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">כניסה לעובד</h2>
+              <p className="text-gray-400 text-sm mb-6">הזן את תעודת הזהות שלך</p>
+
               <form onSubmit={handleIdSubmit}>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                <div className="mb-5">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
                     תעודת זהות
                   </label>
                   <input
@@ -111,34 +198,39 @@ export default function EmployeeLogin() {
                     maxLength={9}
                     value={idNumber}
                     onChange={e => setIdNumber(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456789"
-                    className="w-full border border-gray-300 rounded-xl px-4 py-3 text-center text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="000000000"
+                    className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3.5 text-center
+                      text-2xl tracking-[0.4em] font-bold text-gray-800
+                      focus:outline-none focus:border-indigo-500 transition-colors bg-gray-50 focus:bg-white"
                     autoFocus
+                    dir="ltr"
                   />
-                  <p className="text-xs text-gray-400 mt-1 text-center">9 ספרות</p>
                 </div>
 
                 {error && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
-                    <p className="text-red-600 text-sm text-center">{error}</p>
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-4">
+                    <svg className="w-4 h-4 text-red-500 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-red-600 text-sm">{error}</p>
                   </div>
                 )}
 
                 <button
                   type="submit"
                   disabled={loading || idNumber.length !== 9}
-                  className="w-full bg-blue-600 text-white rounded-xl py-3 font-semibold text-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+                  className="w-full rounded-2xl py-3.5 font-bold text-base transition-all
+                    disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]
+                    flex items-center justify-center gap-2"
+                  style={{ background: loading || idNumber.length !== 9 ? undefined : 'linear-gradient(135deg, #4f46e5, #6366f1)', backgroundColor: loading || idNumber.length !== 9 ? '#e0e0e0' : undefined, color: loading || idNumber.length !== 9 ? '#999' : 'white' }}
                 >
-                  {loading ? 'מאמת...' : 'המשך'}
+                  {loading ? <><Spinner /> מאמת...</> : 'המשך'}
                 </button>
               </form>
 
-              <div className="mt-6 text-center">
-                <a
-                  href="/manager/login"
-                  className="text-sm text-gray-400 hover:text-gray-600"
-                >
-                  כניסת מנהל →
+              <div className="mt-6 pt-5 border-t border-gray-100 text-center">
+                <a href="/manager/login" className="text-sm text-gray-400 hover:text-indigo-600 transition-colors">
+                  כניסת מנהל
                 </a>
               </div>
             </>
@@ -147,55 +239,46 @@ export default function EmployeeLogin() {
           {step === 'otp' && (
             <>
               <button
-                onClick={() => {
-                  setStep('id'); setError(''); setOtp('');
-                  if (recaptchaVerifierRef.current) {
-                    recaptchaVerifierRef.current.clear();
-                    recaptchaVerifierRef.current = null;
-                  }
-                }}
-                className="text-blue-500 text-sm mb-4 flex items-center gap-1"
+                onClick={goBack}
+                className="flex items-center gap-1 text-indigo-500 text-sm mb-5 hover:text-indigo-700 transition-colors"
               >
-                ← חזור
+                <svg className="w-4 h-4 rotate-180" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                </svg>
+                חזור
               </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-2 text-center">
-                אימות מספר טלפון
-              </h2>
+
+              <h2 className="text-xl font-bold text-gray-900 mb-1">קוד אימות</h2>
               {employeeInfo && (
-                <p className="text-gray-500 text-sm text-center mb-6">
-                  שלום <strong>{employeeInfo.name}</strong>!<br />
-                  נשלח קוד אימות לטלפון
-                  <br />
-                  <span dir="ltr">{employeeInfo.phone}</span>
+                <p className="text-gray-400 text-sm mb-6">
+                  שלום <span className="font-semibold text-gray-700">{employeeInfo.name}</span>!
+                  נשלח קוד SMS לטלפון שלך
                 </p>
               )}
+
               <form onSubmit={handleOtpSubmit}>
-                <div className="mb-4">
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    pattern="\d{6}"
-                    maxLength={6}
-                    value={otp}
-                    onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
-                    placeholder="------"
-                    className="otp-input w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    autoFocus
-                  />
+                <div className="mb-5">
+                  <OtpBoxes value={otp} onChange={setOtp} />
                 </div>
 
                 {error && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
-                    <p className="text-red-600 text-sm text-center">{error}</p>
+                  <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-4">
+                    <svg className="w-4 h-4 text-red-500 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-red-600 text-sm">{error}</p>
                   </div>
                 )}
 
                 <button
                   type="submit"
                   disabled={loading || otp.length !== 6}
-                  className="w-full bg-blue-600 text-white rounded-xl py-3 font-semibold text-lg disabled:opacity-50 hover:bg-blue-700 transition-colors"
+                  className="w-full rounded-2xl py-3.5 font-bold text-base text-white transition-all
+                    disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]
+                    flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
                 >
-                  {loading ? 'מאמת...' : 'כניסה'}
+                  {loading ? <><Spinner /> מאמת...</> : 'כניסה'}
                 </button>
               </form>
             </>
