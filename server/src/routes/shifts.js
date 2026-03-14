@@ -91,6 +91,70 @@ router.delete('/:id', verifyToken, requireManager, async (req, res) => {
   }
 });
 
+// POST /api/shifts/import — bulk import from a pre-validated, pre-parsed array
+// Body: { shifts: [{ employeeId, employeeName, date, startTime, endTime, workSite }] }
+// - max 200 rows per request
+// - duplicate check runs in parallel before the batch write
+// - sets importedAt to distinguish bulk imports from manual entries
+router.post('/import', verifyToken, requireManager, async (req, res) => {
+  const { shifts } = req.body;
+  if (!Array.isArray(shifts) || shifts.length === 0) {
+    return res.status(400).json({ error: 'אין משמרות לייבוא' });
+  }
+  if (shifts.length > 200) {
+    return res.status(400).json({ error: 'ניתן לייבא עד 200 משמרות בפעם אחת' });
+  }
+
+  try {
+    // Run all duplicate checks in parallel for speed
+    const checks = await Promise.all(
+      shifts.map(sh =>
+        db.collection('shifts')
+          .where('employeeId', '==', sh.employeeId)
+          .where('date', '==', sh.date)
+          .limit(1)
+          .get()
+          .then(snap => ({ sh, isDup: !snap.empty }))
+      )
+    );
+
+    const batch = db.batch();
+    const now = new Date();
+    const imported = [];
+    const skipped = [];
+
+    for (const { sh, isDup } of checks) {
+      const { employeeId, employeeName, date, startTime, endTime, workSite } = sh;
+      if (!employeeId || !date || !startTime || !endTime) {
+        skipped.push({ ...sh, reason: 'חסרים שדות חובה' });
+        continue;
+      }
+      if (isDup) {
+        skipped.push({ ...sh, reason: 'משמרת כבר קיימת' });
+        continue;
+      }
+      const ref = db.collection('shifts').doc();
+      batch.set(ref, {
+        employeeId,
+        employeeName,
+        date,
+        startTime,
+        endTime,
+        workSite: workSite || '',
+        createdAt: now,
+        importedAt: now,
+      });
+      imported.push(sh);
+    }
+
+    if (imported.length > 0) await batch.commit();
+    res.json({ imported: imported.length, skipped: skipped.length, skippedDetails: skipped });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/shifts/my — authenticated employee sees their own upcoming shifts (next 7 days)
 // Queries by employeeId only (equality) — no composite index required.
 // Date filtering and sorting happen in JS to stay within single-field index limits.

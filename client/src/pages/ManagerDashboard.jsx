@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../lib/firebase';
 import { api } from '../lib/api';
+import * as XLSX from 'xlsx';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 function initials(name = '') {
@@ -571,12 +572,454 @@ function EmployeesTab() {
   );
 }
 
+// ─── Shift file parsing helpers ───────────────────────────────────────────────
+
+/** Normalise a date value coming from an Excel cell into "YYYY-MM-DD". */
+function parseShiftDate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // DD/MM/YYYY  (common Israeli format)
+  const dmy = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  // MM/DD/YYYY
+  const mdy = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, '0')}-${mdy[2].padStart(2, '0')}`;
+  // Try generic JS Date (handles ISO, locale strings, etc.)
+  const d = new Date(s);
+  if (!isNaN(d)) return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+  return null;
+}
+
+/** Normalise a time value coming from an Excel cell into "HH:MM". */
+function parseShiftTime(raw) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  // "08:00" / "8:00" / "08:00:00"
+  const hm = s.match(/^(\d{1,2}):(\d{2})/);
+  if (hm) return `${hm[1].padStart(2, '0')}:${hm[2]}`;
+  // Excel stores time as fraction of day (0.333… = 08:00)
+  const num = parseFloat(s);
+  if (!isNaN(num) && num >= 0 && num < 1) {
+    const total = Math.round(num * 24 * 60);
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  }
+  return null;
+}
+
+/** Read an uploaded .xlsx or .csv file and return an array of raw row objects. */
+async function readShiftFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        // raw:false + dateNF ensures date cells come back as formatted strings
+        const wb = XLSX.read(data, { type: 'array', cellDates: false, raw: false, dateNF: 'YYYY-MM-DD' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        resolve(rows);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/** Column aliases: Hebrew and English variants. */
+const COL = {
+  idNumber:  ['תעודת_זהות', 'תז', 'ת.ז.', 'idNumber', 'id_number', 'id'],
+  date:      ['תאריך', 'date'],
+  startTime: ['שעת_התחלה', 'שעת התחלה', 'כניסה', 'startTime', 'start_time', 'start'],
+  endTime:   ['שעת_סיום',  'שעת סיום',   'יציאה', 'endTime',   'end_time',   'end'],
+  workSite:  ['אתר_עבודה', 'אתר עבודה',  'workSite', 'work_site', 'site'],
+};
+
+function getCol(row, aliases) {
+  for (const a of aliases) {
+    if (row[a] !== undefined && row[a] !== '') return row[a];
+  }
+  return '';
+}
+
+/** Validate parsed rows against the employees list, return annotated rows. */
+function validateShiftRows(rawRows, employees) {
+  return rawRows.map((row, idx) => {
+    const errors = [];
+
+    const idRaw    = getCol(row, COL.idNumber);
+    const dateRaw  = getCol(row, COL.date);
+    const startRaw = getCol(row, COL.startTime);
+    const endRaw   = getCol(row, COL.endTime);
+    const siteRaw  = getCol(row, COL.workSite);
+
+    if (!idRaw)    errors.push('חסרה תעודת זהות');
+    if (!dateRaw)  errors.push('חסר תאריך');
+    if (!startRaw) errors.push('חסרה שעת התחלה');
+    if (!endRaw)   errors.push('חסרה שעת סיום');
+
+    const date      = parseShiftDate(dateRaw);
+    const startTime = parseShiftTime(startRaw);
+    const endTime   = parseShiftTime(endRaw);
+
+    if (idRaw && !errors.includes('חסרה תעודת זהות')) {
+      if (!date)      errors.push(`תאריך לא תקין: "${dateRaw}"`);
+      if (!startTime) errors.push(`שעת התחלה לא תקינה: "${startRaw}"`);
+      if (!endTime)   errors.push(`שעת סיום לא תקינה: "${endRaw}"`);
+      if (startTime && endTime && startTime >= endTime)
+        errors.push('שעת הסיום קודמת לשעת ההתחלה');
+    }
+
+    // Match to existing employee by idNumber
+    const emp = employees.find(e => String(e.idNumber).trim() === String(idRaw).trim());
+    if (idRaw && !emp) errors.push(`עובד עם ת.ז. ${idRaw} לא נמצא במערכת`);
+
+    return {
+      _idx: idx + 2, // 1-based + header row
+      idNumber: String(idRaw).trim(),
+      date,
+      startTime,
+      endTime,
+      workSite: siteRaw || (emp?.workSite ?? ''),
+      employeeId:   emp?.id   ?? null,
+      employeeName: emp?.name ?? String(getCol(row, ['שם', 'name']) || idRaw),
+      valid: errors.length === 0,
+      errors,
+    };
+  });
+}
+
+// ─── ShiftImportPanel ─────────────────────────────────────────────────────────
+function ShiftImportPanel({ employees, onImported, onCancel }) {
+  const fileRef   = useRef(null);
+  const [rows, setRows]         = useState(null);  // validated rows after parse
+  const [parsing, setParsing]   = useState(false);
+  const [parseErr, setParseErr] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [result, setResult]     = useState(null);   // import result summary
+
+  async function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setParsing(true); setParseErr(''); setRows(null); setResult(null);
+    try {
+      const raw = await readShiftFile(file);
+      if (raw.length === 0) { setParseErr('הקובץ ריק או שאין שורות תקינות'); return; }
+      // Check that at least one required column exists
+      const firstRow = raw[0];
+      const hasId   = COL.idNumber.some(c  => firstRow[c] !== undefined);
+      const hasDate = COL.date.some(c      => firstRow[c] !== undefined);
+      const hasStart = COL.startTime.some(c => firstRow[c] !== undefined);
+      const hasEnd   = COL.endTime.some(c   => firstRow[c] !== undefined);
+      if (!hasId || !hasDate || !hasStart || !hasEnd) {
+        setParseErr(
+          'עמודות חובה חסרות. יש לכלול: תעודת_זהות, תאריך, שעת_התחלה, שעת_סיום'
+        );
+        return;
+      }
+      setRows(validateShiftRows(raw, employees));
+    } catch (err) {
+      setParseErr('שגיאה בקריאת הקובץ: ' + err.message);
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  async function handleImport() {
+    if (!rows) return;
+    const valid = rows.filter(r => r.valid);
+    if (valid.length === 0) return;
+    setImporting(true);
+    try {
+      const payload = valid.map(r => ({
+        employeeId:   r.employeeId,
+        employeeName: r.employeeName,
+        date:         r.date,
+        startTime:    r.startTime,
+        endTime:      r.endTime,
+        workSite:     r.workSite,
+      }));
+      const res = await api.importShifts(payload);
+      setResult(res);
+      onImported(); // refresh parent list
+    } catch (err) {
+      setParseErr('שגיאה בייבוא: ' + err.message);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const validCount   = rows?.filter(r => r.valid).length  ?? 0;
+  const invalidCount = rows?.filter(r => !r.valid).length ?? 0;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-4 mb-4 border border-violet-100">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-gray-700">ייבוא משמרות מקובץ</h3>
+        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 p-1">
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Format hint */}
+      {!rows && !result && (
+        <p className="text-xs text-gray-400 mb-3 bg-gray-50 rounded-xl px-3 py-2 leading-relaxed">
+          עמודות נדרשות: <span className="font-medium text-gray-600">תעודת_זהות · תאריך · שעת_התחלה · שעת_סיום</span><br />
+          אופציונלי: <span className="font-medium text-gray-600">אתר_עבודה</span><br />
+          פורמט תאריך: YYYY-MM-DD / DD/MM/YYYY · שעה: HH:MM
+        </p>
+      )}
+
+      {/* File picker */}
+      {!result && (
+        <label className={`flex items-center justify-center gap-2 w-full py-3 rounded-xl border-2 border-dashed cursor-pointer transition-colors text-sm font-medium mb-3 ${
+          parsing ? 'border-gray-200 text-gray-400' : 'border-violet-300 text-violet-600 hover:border-violet-400 hover:bg-violet-50'
+        }`}>
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+          </svg>
+          {parsing ? 'מעבד...' : rows ? 'החלף קובץ' : 'בחר קובץ Excel / CSV'}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleFile}
+            className="hidden"
+            disabled={parsing}
+          />
+        </label>
+      )}
+
+      {parseErr && (
+        <p className="text-red-500 text-sm bg-red-50 rounded-xl px-3 py-2 mb-3">{parseErr}</p>
+      )}
+
+      {/* Preview table */}
+      {rows && !result && (
+        <>
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            {validCount > 0 && (
+              <span className="text-xs bg-emerald-100 text-emerald-700 font-medium px-2.5 py-1 rounded-full">
+                ✓ {validCount} שורות תקינות
+              </span>
+            )}
+            {invalidCount > 0 && (
+              <span className="text-xs bg-red-100 text-red-600 font-medium px-2.5 py-1 rounded-full">
+                ✗ {invalidCount} שגיאות
+              </span>
+            )}
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-gray-100 mb-3">
+            <table className="w-full text-xs" dir="rtl">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 text-right font-semibold">שם עובד</th>
+                  <th className="px-3 py-2 text-right font-semibold">ת.ז.</th>
+                  <th className="px-3 py-2 text-right font-semibold">תאריך</th>
+                  <th className="px-3 py-2 text-right font-semibold">שעות</th>
+                  <th className="px-3 py-2 text-right font-semibold">אתר</th>
+                  <th className="px-3 py-2 text-right font-semibold">סטטוס</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {rows.map((r, i) => (
+                  <tr key={i} className={r.valid ? 'bg-white' : 'bg-red-50'}>
+                    <td className="px-3 py-2 font-medium text-gray-800">{r.employeeName}</td>
+                    <td className="px-3 py-2 text-gray-500" dir="ltr">{r.idNumber}</td>
+                    <td className="px-3 py-2 text-gray-600" dir="ltr">{r.date ?? '—'}</td>
+                    <td className="px-3 py-2 font-mono text-indigo-600" dir="ltr">
+                      {r.startTime && r.endTime ? `${r.startTime}–${r.endTime}` : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500">{r.workSite || '—'}</td>
+                    <td className="px-3 py-2">
+                      {r.valid
+                        ? <span className="text-emerald-600 font-bold">✓</span>
+                        : <span className="text-red-500" title={r.errors.join(' | ')}>✗ {r.errors[0]}</span>
+                      }
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleImport}
+              disabled={importing || validCount === 0}
+              className="flex-1 bg-violet-600 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40"
+            >
+              {importing ? 'מייבא...' : `ייבא ${validCount} משמרות`}
+            </button>
+            <button onClick={onCancel} className="flex-1 bg-gray-100 text-gray-600 rounded-xl py-2.5 text-sm">
+              ביטול
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Result summary */}
+      {result && (
+        <div className="text-center py-2">
+          <p className="text-emerald-600 font-semibold text-sm">
+            ✓ יובאו {result.imported} משמרות בהצלחה
+          </p>
+          {result.skipped > 0 && (
+            <p className="text-amber-600 text-xs mt-1">
+              {result.skipped} שורות דולגו (כפילויות או שגיאות)
+            </p>
+          )}
+          <button
+            onClick={onCancel}
+            className="mt-3 bg-gray-100 text-gray-600 rounded-xl px-5 py-2 text-sm"
+          >
+            סגור
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── WeeklyBoard ──────────────────────────────────────────────────────────────
+const HE_DAYS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳']; // Sun–Sat
+
+/** Returns an array of 7 ISO date strings for the week starting on Sunday. */
+function getWeekDates(offsetWeeks = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay() + offsetWeeks * 7); // back to Sunday
+  return Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(d);
+    day.setDate(d.getDate() + i);
+    return day.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+  });
+}
+
+function WeeklyBoard({ shifts }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const weekDates = getWeekDates(weekOffset);
+  const todayISO  = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+
+  // Build map: employeeId → { name, shifts: { [date]: shift } }
+  const empMap = {};
+  for (const sh of shifts) {
+    if (!empMap[sh.employeeId]) {
+      empMap[sh.employeeId] = { name: sh.employeeName, byDate: {} };
+    }
+    empMap[sh.employeeId].byDate[sh.date] = sh;
+  }
+  const empRows = Object.values(empMap).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+
+  // Week label
+  const startLabel = new Date(weekDates[0] + 'T00:00:00')
+    .toLocaleDateString('he-IL', { day: 'numeric', month: 'short' });
+  const endLabel   = new Date(weekDates[6] + 'T00:00:00')
+    .toLocaleDateString('he-IL', { day: 'numeric', month: 'short' });
+
+  if (empRows.length === 0) {
+    return <EmptyState icon="📅" text="אין משמרות מתוכננות לשבוע זה" />;
+  }
+
+  return (
+    <div>
+      {/* Week navigator */}
+      <div className="flex items-center justify-between mb-3">
+        <button
+          onClick={() => setWeekOffset(w => w - 1)}
+          className="p-2 rounded-xl hover:bg-gray-100 text-gray-500"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+        </button>
+        <div className="text-center">
+          <p className="text-sm font-semibold text-gray-700" dir="ltr">{startLabel} – {endLabel}</p>
+          {weekOffset !== 0 && (
+            <button onClick={() => setWeekOffset(0)} className="text-xs text-indigo-500 hover:underline">
+              חזור לשבוע הנוכחי
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => setWeekOffset(w => w + 1)}
+          className="p-2 rounded-xl hover:bg-gray-100 text-gray-500"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Scrollable board — dir="ltr" so columns are ordered Sun→Sat */}
+      <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <table className="text-xs border-collapse" dir="ltr" style={{ minWidth: 560 }}>
+          <thead>
+            <tr className="bg-gray-50">
+              {/* Sticky employee name column */}
+              <th className="sticky right-0 z-10 bg-gray-50 px-3 py-2.5 text-right font-semibold text-gray-500 border-b border-gray-100 min-w-[100px]">
+                עובד
+              </th>
+              {weekDates.map((date, i) => {
+                const isToday = date === todayISO;
+                const dayNum  = new Date(date + 'T00:00:00').toLocaleDateString('he-IL', { day: 'numeric' });
+                return (
+                  <th key={date} className={`px-2 py-2.5 font-semibold border-b border-gray-100 text-center min-w-[72px] ${
+                    isToday ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500'
+                  }`}>
+                    <div>{HE_DAYS[i]}</div>
+                    <div className={`text-xs font-normal ${isToday ? 'text-indigo-400' : 'text-gray-400'}`}>{dayNum}</div>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {empRows.map(emp => (
+              <tr key={emp.name} className="border-b border-gray-50 last:border-0">
+                <td className="sticky right-0 z-10 bg-white px-3 py-2 text-right font-semibold text-gray-700 text-xs border-l border-gray-100">
+                  {emp.name}
+                </td>
+                {weekDates.map(date => {
+                  const sh = emp.byDate[date];
+                  const isToday = date === todayISO;
+                  return (
+                    <td key={date} className={`px-1 py-2 text-center ${isToday ? 'bg-indigo-50/60' : ''}`}>
+                      {sh ? (
+                        <div className="inline-flex flex-col items-center">
+                          <span className="font-mono text-indigo-700 font-bold text-xs" dir="ltr">
+                            {sh.startTime}
+                          </span>
+                          <span className="text-gray-300 text-xs leading-none">|</span>
+                          <span className="font-mono text-indigo-500 text-xs" dir="ltr">
+                            {sh.endTime}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-200">—</span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Shifts Tab ───────────────────────────────────────────────────────────────
 function ShiftsTab() {
   const [employees, setEmployees] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'board'
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -649,18 +1092,56 @@ function ShiftsTab() {
 
   return (
     <div className="p-4">
-      <div className="flex items-center justify-between mb-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-3">
         <h2 className="font-bold text-gray-800">ניהול משמרות</h2>
-        <button
-          onClick={() => { setShowForm(!showForm); setFormError(''); }}
-          className="bg-indigo-600 text-white rounded-xl px-4 py-2 text-sm font-semibold flex items-center gap-1.5"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-          </svg>
-          משמרת חדשה
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Import button */}
+          <button
+            onClick={() => { setShowImport(!showImport); setShowForm(false); }}
+            className="flex items-center gap-1.5 bg-violet-600 text-white rounded-xl px-3 py-2 text-sm font-semibold"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+            ייבוא
+          </button>
+          {/* Add single shift button */}
+          <button
+            onClick={() => { setShowForm(!showForm); setShowImport(false); setFormError(''); }}
+            className="bg-indigo-600 text-white rounded-xl px-3 py-2 text-sm font-semibold flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+            </svg>
+            הוסף
+          </button>
+        </div>
       </div>
+
+      {/* View toggle — list / board */}
+      <div className="flex bg-gray-100 rounded-xl p-1 mb-4">
+        {['list', 'board'].map(mode => (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode)}
+            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+              viewMode === mode ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            {mode === 'list' ? '📋 רשימה' : '📅 לוח שבועי'}
+          </button>
+        ))}
+      </div>
+
+      {/* Import panel */}
+      {showImport && (
+        <ShiftImportPanel
+          employees={employees}
+          onImported={() => { loadShifts(); setShowImport(false); }}
+          onCancel={() => setShowImport(false)}
+        />
+      )}
 
       {/* Create form */}
       {showForm && (
@@ -755,42 +1236,50 @@ function ShiftsTab() {
 
       {loading && <Spinner />}
 
-      {!loading && sortedDates.length === 0 && (
-        <EmptyState icon="📅" text="אין משמרות מתוכננות לשבוע הקרוב" />
+      {/* ── List view ── */}
+      {!loading && viewMode === 'list' && (
+        <>
+          {sortedDates.length === 0 && (
+            <EmptyState icon="📅" text="אין משמרות מתוכננות לשבוע הקרוב" />
+          )}
+          <div className="space-y-4">
+            {sortedDates.map(date => (
+              <div key={date}>
+                <p className="text-xs font-semibold text-gray-400 mb-2 px-1">{formatDate(date)}</p>
+                <div className="space-y-2">
+                  {grouped[date].map(sh => (
+                    <div key={sh.id} className="bg-white rounded-2xl shadow-sm px-4 py-3 flex items-center gap-3">
+                      <Avatar name={sh.employeeName} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-800 text-sm truncate">{sh.employeeName}</p>
+                        <p className="text-xs text-gray-400 truncate">{sh.workSite}</p>
+                      </div>
+                      <div className="shrink-0 text-left">
+                        <p className="font-mono text-indigo-600 text-sm font-bold" dir="ltr">
+                          {sh.startTime} – {sh.endTime}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDelete(sh.id)}
+                        className="text-gray-300 hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-50 shrink-0"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
-      {/* Shifts grouped by date */}
-      <div className="space-y-4">
-        {sortedDates.map(date => (
-          <div key={date}>
-            <p className="text-xs font-semibold text-gray-400 mb-2 px-1">{formatDate(date)}</p>
-            <div className="space-y-2">
-              {grouped[date].map(sh => (
-                <div key={sh.id} className="bg-white rounded-2xl shadow-sm px-4 py-3 flex items-center gap-3">
-                  <Avatar name={sh.employeeName} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-800 text-sm truncate">{sh.employeeName}</p>
-                    <p className="text-xs text-gray-400 truncate">{sh.workSite}</p>
-                  </div>
-                  <div className="shrink-0 text-left">
-                    <p className="font-mono text-indigo-600 text-sm font-bold" dir="ltr">
-                      {sh.startTime} – {sh.endTime}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleDelete(sh.id)}
-                    className="text-gray-300 hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-50 shrink-0"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* ── Board view ── */}
+      {!loading && viewMode === 'board' && (
+        <WeeklyBoard shifts={shifts} />
+      )}
     </div>
   );
 }

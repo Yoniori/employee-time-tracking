@@ -99,6 +99,9 @@ export const api = {
   deleteShift: (id) =>
     request(`/api/shifts/${id}`, { method: 'DELETE' }),
 
+  importShifts: (shifts) =>
+    request('/api/shifts/import', { method: 'POST', body: { shifts } }),
+
   getMyShifts: () =>
     request('/api/shifts/my'),
 
