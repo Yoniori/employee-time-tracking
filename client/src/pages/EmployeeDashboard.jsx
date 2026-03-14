@@ -344,8 +344,10 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
-        {/* Today's shift card */}
-        {!shiftsLoading && (
+        {/* Today's shift card.
+            Hide the amber "no shift" warning when already clocked in —
+            the employee is actively working so the warning is misleading. */}
+        {!shiftsLoading && (todayShift !== null || !clockedIn) && (
           <div className={`rounded-2xl px-4 py-3 mb-4 flex items-center gap-3
             ${todayShift
               ? 'bg-indigo-50 border border-indigo-100'

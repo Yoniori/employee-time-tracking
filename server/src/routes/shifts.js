@@ -24,6 +24,20 @@ router.post('/', verifyToken, requireManager, async (req, res) => {
     if (!empDoc.exists) return res.status(404).json({ error: 'עובד לא נמצא' });
     const emp = empDoc.data();
 
+    // Duplicate guard: one shift per employee per day
+    // Uses two equality filters — no composite index required
+    const existing = await db.collection('shifts')
+      .where('employeeId', '==', employeeId)
+      .where('date', '==', date)
+      .limit(1)
+      .get();
+    if (!existing.empty) {
+      return res.status(409).json({
+        error: 'כבר קיימת משמרת לעובד זה בתאריך זה',
+        existingShiftId: existing.docs[0].id,
+      });
+    }
+
     const ref = db.collection('shifts').doc();
     await ref.set({
       employeeId,
@@ -97,10 +111,11 @@ router.get('/my', verifyToken, async (req, res) => {
     future.setDate(future.getDate() + 6);
     const futureStr = future.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 
-    // Single equality filter — uses auto-index on employeeId, no composite index needed
+    // Single equality filter — uses auto-index on employeeId, no composite index needed.
+    // limit(100) gives ~20 weeks of daily shifts before JS filtering could miss results.
     const snap = await db.collection('shifts')
       .where('employeeId', '==', employeeId)
-      .limit(50)
+      .limit(100)
       .get();
 
     // Filter this week in JS and sort by date
