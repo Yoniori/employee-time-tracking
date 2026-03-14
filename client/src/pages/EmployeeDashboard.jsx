@@ -70,6 +70,10 @@ export default function EmployeeDashboard() {
   const [success, setSuccess] = useState('');
   const [flashSuccess, setFlashSuccess] = useState(false);
   const [now, setNow] = useState(new Date());
+  const [recentRecords, setRecentRecords] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [shifts, setShifts] = useState([]);
+  const [shiftsLoading, setShiftsLoading] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -82,6 +86,8 @@ export default function EmployeeDashboard() {
       const emp = JSON.parse(stored);
       setEmployeeData(emp);
       loadStatus(emp.employeeId);
+      loadHistory();
+      loadShifts();
     }
   }, []);
 
@@ -105,6 +111,30 @@ export default function EmployeeDashboard() {
     }
   }
 
+  async function loadHistory() {
+    setHistoryLoading(true);
+    try {
+      const records = await api.getMyRecords();
+      setRecentRecords(records);
+    } catch {
+      // ignore — history is non-critical
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function loadShifts() {
+    setShiftsLoading(true);
+    try {
+      const data = await api.getMyShifts();
+      setShifts(data);
+    } catch {
+      // non-critical — fail silently
+    } finally {
+      setShiftsLoading(false);
+    }
+  }
+
   async function handleClockIn() {
     setLoading(true);
     setLoadingStep('gps');
@@ -120,6 +150,7 @@ export default function EmployeeDashboard() {
       setSuccess('כניסה נרשמה בהצלחה!');
       setFlashSuccess(true);
       setTimeout(() => setFlashSuccess(false), 1200);
+      loadHistory();
     } catch (err) {
       setError(err.message || 'שגיאה ברישום כניסה');
     } finally {
@@ -141,6 +172,7 @@ export default function EmployeeDashboard() {
       setRecordId(null);
       const hours = result.totalHours?.toFixed(2);
       setSuccess(`יציאה נרשמה בהצלחה! סה"כ ${hours} שעות`);
+      loadHistory();
     } catch (err) {
       setError(err.message || 'שגיאה ברישום יציאה');
     } finally {
@@ -165,6 +197,12 @@ export default function EmployeeDashboard() {
 
   const name = employeeData?.name || '';
   const busy = loading || gpsLoading;
+
+  // Shifts derived state
+  const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+  const todayShift = shifts.find(s => s.date === todayISO) || null;
+  // Allow clock-out even when no shift (employee must always be able to leave)
+  const canReport = clockedIn || todayShift !== null;
 
   return (
     <div className="min-h-screen bg-[#F4F5FF] flex flex-col" dir="rtl">
@@ -306,21 +344,55 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
+        {/* Today's shift card */}
+        {!shiftsLoading && (
+          <div className={`rounded-2xl px-4 py-3 mb-4 flex items-center gap-3
+            ${todayShift
+              ? 'bg-indigo-50 border border-indigo-100'
+              : 'bg-amber-50 border border-amber-100'}`}
+          >
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0
+              ${todayShift ? 'bg-indigo-100' : 'bg-amber-100'}`}
+            >
+              <svg className={`w-5 h-5 ${todayShift ? 'text-indigo-600' : 'text-amber-500'}`}
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-xs font-semibold mb-0.5 ${todayShift ? 'text-indigo-600' : 'text-amber-600'}`}>
+                משמרת היום
+              </p>
+              {todayShift ? (
+                <p className="text-sm font-bold text-gray-800" dir="ltr">
+                  {todayShift.startTime} – {todayShift.endTime}
+                  {todayShift.workSite && (
+                    <span className="text-xs font-normal text-gray-500 mr-2" dir="rtl">{todayShift.workSite}</span>
+                  )}
+                </p>
+              ) : (
+                <p className="text-sm text-amber-700">לא קיימת משמרת מתוכננת להיום</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Clock In/Out button — pulses when idle and not clocked in */}
-        <div className={`relative rounded-3xl ${!busy && !clockedIn ? 'ring-4 ring-indigo-200 ring-offset-2 ring-offset-[#F4F5FF] animate-pulse' : ''}`}>
+        <div className={`relative rounded-3xl ${!busy && !clockedIn && canReport ? 'ring-4 ring-indigo-200 ring-offset-2 ring-offset-[#F4F5FF] animate-pulse' : ''}`}>
           <button
             onClick={clockedIn ? handleClockOut : handleClockIn}
-            disabled={busy}
+            disabled={busy || !canReport}
             className="w-full rounded-3xl py-6 font-bold text-lg transition-all active:scale-[0.97]
               disabled:cursor-not-allowed flex items-center justify-center gap-3"
             style={{
-              background: busy
+              background: (busy || !canReport)
                 ? '#e5e7eb'
                 : clockedIn
                 ? 'linear-gradient(135deg, #ef4444, #f97316)'
                 : 'linear-gradient(135deg, #4f46e5, #6366f1)',
-              color: busy ? '#9ca3af' : 'white',
-              boxShadow: busy ? 'none' : clockedIn
+              color: (busy || !canReport) ? '#9ca3af' : 'white',
+              boxShadow: (busy || !canReport) ? 'none' : clockedIn
                 ? '0 8px 24px rgba(239,68,68,0.35)'
                 : '0 8px 24px rgba(79,70,229,0.40)',
             }}
@@ -352,10 +424,117 @@ export default function EmployeeDashboard() {
         <p className="text-xs text-gray-400 text-center mt-3">
           {busy
             ? loadingStep === 'gps' ? 'ממתין לאישור מיקום...' : 'שומר נתונים...'
+            : !canReport
+            ? 'לא ניתן לרשום נוכחות — אין משמרת מתוכננת להיום'
             : clockedIn
             ? 'לחץ בסיום המשמרת לרישום יציאה'
             : 'לחץ לרישום תחילת המשמרת'}
         </p>
+
+        {/* This week's shifts */}
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500">משמרות השבוע</h2>
+            {shiftsLoading && <Spinner className="h-4 w-4 text-indigo-400" />}
+          </div>
+
+          {!shiftsLoading && shifts.length === 0 ? (
+            <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
+              <p className="text-gray-400 text-sm">לא נמצאו משמרות לשבוע הקרוב</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-50">
+              {shifts.map(sh => {
+                const isToday = sh.date === todayISO;
+                const d = new Date(sh.date + 'T00:00:00');
+                const dayLabel = d.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' });
+                return (
+                  <div key={sh.id} className={`flex items-center justify-between px-4 py-3 ${isToday ? 'bg-indigo-50' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0
+                        ${isToday ? 'bg-indigo-500' : 'bg-gray-100'}`}>
+                        <svg className={`w-4 h-4 ${isToday ? 'text-white' : 'text-gray-400'}`}
+                          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="3" y="4" width="18" height="18" rx="2" />
+                          <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className={`text-sm font-medium ${isToday ? 'text-indigo-700 font-bold' : 'text-gray-800'}`}>
+                          {dayLabel}{isToday ? ' — היום' : ''}
+                        </p>
+                        {sh.workSite && (
+                          <p className="text-xs text-gray-400">{sh.workSite}</p>
+                        )}
+                      </div>
+                    </div>
+                    <p className={`font-mono text-sm font-semibold ${isToday ? 'text-indigo-600' : 'text-gray-600'}`} dir="ltr">
+                      {sh.startTime} – {sh.endTime}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Recent records history */}
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500">היסטוריית נוכחות</h2>
+            {historyLoading && <Spinner className="h-4 w-4 text-indigo-400" />}
+          </div>
+
+          {!historyLoading && recentRecords.length === 0 ? (
+            <div className="bg-white rounded-2xl p-5 text-center shadow-sm">
+              <p className="text-gray-400 text-sm">אין רשומות נוכחות</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-50">
+              {recentRecords.map((rec) => {
+                const dateObj = new Date(rec.clockIn);
+                const date = dateObj.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric', year: '2-digit' });
+                const clockInTime = dateObj.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+                const clockOutTime = rec.clockOut
+                  ? new Date(rec.clockOut).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+                  : null;
+                const isActive = !rec.clockOut;
+                return (
+                  <div key={rec.id} className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0
+                        ${isActive ? 'bg-emerald-100' : 'bg-indigo-50'}`}>
+                        <svg className={`w-4 h-4 ${isActive ? 'text-emerald-600' : 'text-indigo-400'}`}
+                          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M12 7v5l3 3" strokeLinecap="round" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-800" dir="ltr">{date}</p>
+                        <p className="text-xs text-gray-400" dir="ltr">
+                          {clockInTime} – {clockOutTime ?? <span className="text-emerald-500 font-medium">פעיל</span>}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-left">
+                      {rec.totalHours != null ? (
+                        <span className="text-sm font-semibold text-gray-700" dir="ltr">
+                          {rec.totalHours.toFixed(2)}
+                          <span className="text-xs font-normal text-gray-400 mr-0.5"> שע'</span>
+                        </span>
+                      ) : isActive ? (
+                        <span className="text-xs font-medium text-emerald-500">פעיל</span>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

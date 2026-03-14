@@ -26,6 +26,7 @@ app.use('/api/auth/lookup-employee', lookupLimiter);
 // Routes
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/time-records', require('./routes/timeRecords'));
+app.use('/api/shifts', require('./routes/shifts'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sheets', require('./routes/sheets'));
 

@@ -74,8 +74,8 @@ function SearchBar({ value, onChange, placeholder }) {
 }
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
-const TABS = ['live', 'records', 'employees', 'settings'];
-const TAB_LABELS = { live: 'נוכחים', records: 'רשומות', employees: 'עובדים', settings: 'הגדרות' };
+const TABS = ['live', 'records', 'employees', 'shifts', 'settings'];
+const TAB_LABELS = { live: 'נוכחים', records: 'רשומות', employees: 'עובדים', shifts: 'משמרות', settings: 'הגדרות' };
 
 function TabIcon({ tab, active }) {
   const cls = `w-5 h-5 ${active ? 'text-indigo-600' : 'text-gray-400'}`;
@@ -92,6 +92,14 @@ function TabIcon({ tab, active }) {
   if (tab === 'employees') return (
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" />
+    </svg>
+  );
+  if (tab === 'shifts') return (
+    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01" strokeLinecap="round" />
+      <circle cx="8" cy="18" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="18" r="1" fill="currentColor" stroke="none" />
     </svg>
   );
   return (
@@ -140,6 +148,7 @@ export default function ManagerDashboard() {
         {tab === 'live'      && <LiveTab />}
         {tab === 'records'   && <RecordsTab />}
         {tab === 'employees' && <EmployeesTab />}
+        {tab === 'shifts'    && <ShiftsTab />}
         {tab === 'settings'  && <SettingsTab />}
       </div>
 
@@ -557,6 +566,230 @@ function EmployeesTab() {
           </div>
         ))}
         {!loading && filtered.length === 0 && <EmptyState icon="👥" text="לא נמצאו עובדים" />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Shifts Tab ───────────────────────────────────────────────────────────────
+function ShiftsTab() {
+  const [employees, setEmployees] = useState([]);
+  const [shifts, setShifts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  // Default form values: today and sensible times
+  const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+  const [form, setForm] = useState({
+    employeeId: '',
+    date: todayISO,
+    startTime: '08:00',
+    endTime: '17:00',
+    workSite: '',
+  });
+
+  useEffect(() => {
+    api.getEmployees().then(setEmployees).catch(() => {});
+    loadShifts();
+  }, []); // eslint-disable-line
+
+  async function loadShifts() {
+    setLoading(true);
+    try {
+      setShifts(await api.getShifts());
+    } catch { /* ignore */ } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    setFormError('');
+    if (!form.employeeId) { setFormError('יש לבחור עובד'); return; }
+    setSaving(true);
+    try {
+      // Pass workSite only if the manager filled it in; backend falls back to employee's site
+      const payload = { ...form };
+      if (!payload.workSite) delete payload.workSite;
+      await api.createShift(payload);
+      setShowForm(false);
+      setForm(f => ({ ...f, employeeId: '', workSite: '' }));
+      loadShifts();
+    } catch (err) {
+      setFormError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('למחוק משמרת זו?')) return;
+    try {
+      await api.deleteShift(id);
+      setShifts(s => s.filter(sh => sh.id !== id));
+    } catch (err) {
+      alert('שגיאה: ' + err.message);
+    }
+  }
+
+  // Group shifts by date for a cleaner weekly view
+  const grouped = shifts.reduce((acc, sh) => {
+    if (!acc[sh.date]) acc[sh.date] = [];
+    acc[sh.date].push(sh);
+    return acc;
+  }, {});
+  const sortedDates = Object.keys(grouped).sort();
+
+  function formatDate(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-bold text-gray-800">ניהול משמרות</h2>
+        <button
+          onClick={() => { setShowForm(!showForm); setFormError(''); }}
+          className="bg-indigo-600 text-white rounded-xl px-4 py-2 text-sm font-semibold flex items-center gap-1.5"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+          </svg>
+          משמרת חדשה
+        </button>
+      </div>
+
+      {/* Create form */}
+      {showForm && (
+        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4 border border-indigo-100">
+          <h3 className="font-semibold text-gray-700 mb-3">הוספת משמרת</h3>
+          <form onSubmit={handleCreate} className="space-y-3">
+            {/* Employee picker */}
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">עובד *</label>
+              <select
+                value={form.employeeId}
+                onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}
+                required
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              >
+                <option value="">בחר עובד...</option>
+                {employees.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.name} — {emp.workSite}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Date */}
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">תאריך *</label>
+              <input
+                type="date"
+                value={form.date}
+                onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                required
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              />
+            </div>
+
+            {/* Start / end time */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">שעת התחלה *</label>
+                <input
+                  type="time"
+                  value={form.startTime}
+                  onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))}
+                  required
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">שעת סיום *</label>
+                <input
+                  type="time"
+                  value={form.endTime}
+                  onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
+                  required
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                />
+              </div>
+            </div>
+
+            {/* Optional work site override */}
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">אתר עבודה (אופציונלי — ברירת מחדל: אתר העובד)</label>
+              <input
+                type="text"
+                value={form.workSite}
+                onChange={e => setForm(f => ({ ...f, workSite: e.target.value }))}
+                placeholder="השאר ריק לשימוש באתר ברירת המחדל"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              />
+            </div>
+
+            {formError && <p className="text-red-500 text-sm">{formError}</p>}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex-1 bg-indigo-600 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50"
+              >
+                {saving ? 'שומר...' : 'שמור משמרת'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="flex-1 bg-gray-100 text-gray-600 rounded-xl py-2.5 text-sm"
+              >
+                ביטול
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {loading && <Spinner />}
+
+      {!loading && sortedDates.length === 0 && (
+        <EmptyState icon="📅" text="אין משמרות מתוכננות לשבוע הקרוב" />
+      )}
+
+      {/* Shifts grouped by date */}
+      <div className="space-y-4">
+        {sortedDates.map(date => (
+          <div key={date}>
+            <p className="text-xs font-semibold text-gray-400 mb-2 px-1">{formatDate(date)}</p>
+            <div className="space-y-2">
+              {grouped[date].map(sh => (
+                <div key={sh.id} className="bg-white rounded-2xl shadow-sm px-4 py-3 flex items-center gap-3">
+                  <Avatar name={sh.employeeName} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-800 text-sm truncate">{sh.employeeName}</p>
+                    <p className="text-xs text-gray-400 truncate">{sh.workSite}</p>
+                  </div>
+                  <div className="shrink-0 text-left">
+                    <p className="font-mono text-indigo-600 text-sm font-bold" dir="ltr">
+                      {sh.startTime} – {sh.endTime}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(sh.id)}
+                    className="text-gray-300 hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-50 shrink-0"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

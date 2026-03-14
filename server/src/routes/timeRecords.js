@@ -4,6 +4,11 @@ const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
 
+// Returns today's date as "YYYY-MM-DD" in Israel time
+function todayInIsrael() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+}
+
 function haversineDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000; // meters
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -33,18 +38,43 @@ router.post('/clock-in', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'אין הרשאה לבצע פעולה זו' });
     }
 
-    // Location verification
-    if (emp.location?.lat == null || emp.location?.lng == null) {
-      return res.status(400).json({ error: 'לא הוגדר מיקום לאתר העבודה - פנה למנהל' });
-    }
-    const allowed = emp.allowedRadius || 200;
-    const distance = haversineDistance(lat, lng, emp.location.lat, emp.location.lng);
-    if (distance > allowed) {
+    // Shift restriction: employee must have a scheduled shift today.
+    // Uses equality filters on two fields — no composite Firestore index required.
+    // Clock-OUT is intentionally NOT gated here so employees can always leave.
+    const today = todayInIsrael();
+    const shiftSnap = await db.collection('shifts')
+      .where('employeeId', '==', employeeId)
+      .where('date', '==', today)
+      .limit(1)
+      .get();
+    if (shiftSnap.empty) {
       return res.status(403).json({
-        error: `אינך נמצא במיקום העבודה (${Math.round(distance)} מ' מהאתר, מותר עד ${allowed} מ')`,
-        distance: Math.round(distance),
-        allowed,
+        error: 'לא קיימת משמרת מתוכננת להיום - פנה למנהל לתזמון משמרת',
+        noShift: true,
       });
+    }
+
+    // Location verification
+    // BYPASS_GEOFENCE=true skips the radius check in non-production environments only.
+    // To re-enable: remove BYPASS_GEOFENCE from the environment (or set it to anything other than 'true').
+    // In production this block always runs regardless of BYPASS_GEOFENCE.
+    const bypassGeofence =
+      process.env.NODE_ENV !== 'production' &&
+      process.env.BYPASS_GEOFENCE === 'true';
+
+    if (!bypassGeofence) {
+      if (emp.location?.lat == null || emp.location?.lng == null) {
+        return res.status(400).json({ error: 'לא הוגדר מיקום לאתר העבודה - פנה למנהל' });
+      }
+      const allowed = emp.allowedRadius || 200;
+      const distance = haversineDistance(lat, lng, emp.location.lat, emp.location.lng);
+      if (distance > allowed) {
+        return res.status(403).json({
+          error: `אינך נמצא במיקום העבודה (${Math.round(distance)} מ' מהאתר, מותר עד ${allowed} מ')`,
+          distance: Math.round(distance),
+          allowed,
+        });
+      }
     }
 
     // Atomic duplicate-check + write via Firestore transaction
@@ -155,6 +185,42 @@ router.get('/status/:employeeId', verifyToken, async (req, res) => {
       clockIn: data.clockIn?.toDate ? data.clockIn.toDate().toISOString() : data.clockIn,
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET last 10 records for the authenticated employee (self-service)
+router.get('/my', verifyToken, async (req, res) => {
+  try {
+    const phone = req.user.phone_number;
+    if (!phone) return res.status(400).json({ error: 'מספר טלפון לא זמין' });
+
+    const empSnap = await db.collection('employees')
+      .where('phone', '==', phone)
+      .limit(1).get();
+    if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
+    const employeeId = empSnap.docs[0].id;
+
+    const snap = await db.collection('timeRecords')
+      .where('employeeId', '==', employeeId)
+      .orderBy('clockIn', 'desc')
+      .limit(10)
+      .get();
+
+    const records = snap.docs.map(d => {
+      const r = d.data();
+      return {
+        id: d.id,
+        clockIn: r.clockIn?.toDate ? r.clockIn.toDate().toISOString() : r.clockIn,
+        clockOut: r.clockOut?.toDate ? r.clockOut.toDate().toISOString() : r.clockOut,
+        totalHours: r.totalHours,
+        workSite: r.workSite,
+      };
+    });
+
+    res.json(records);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });

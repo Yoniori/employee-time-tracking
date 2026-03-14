@@ -35,6 +35,9 @@ export const api = {
   getStatus: (employeeId) =>
     request(`/api/time-records/status/${employeeId}`),
 
+  getMyRecords: () =>
+    request('/api/time-records/my'),
+
   getLiveRecords: () =>
     request('/api/time-records/live'),
 
@@ -83,6 +86,21 @@ export const api = {
 
   seedData: () =>
     fetch(`${BASE}/api/auth/seed-manager`, { method: 'POST' }).then(r => r.json()),
+
+  // Shifts
+  createShift: (data) =>
+    request('/api/shifts', { method: 'POST', body: data }),
+
+  getShifts: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/shifts${qs ? '?' + qs : ''}`);
+  },
+
+  deleteShift: (id) =>
+    request(`/api/shifts/${id}`, { method: 'DELETE' }),
+
+  getMyShifts: () =>
+    request('/api/shifts/my'),
 
   // Sheets
   syncSheets: (spreadsheetId) =>
