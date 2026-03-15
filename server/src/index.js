@@ -29,6 +29,7 @@ app.use('/api/time-records', require('./routes/timeRecords'));
 app.use('/api/shifts', require('./routes/shifts'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sheets', require('./routes/sheets'));
+app.use('/api/signup', require('./routes/signup'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

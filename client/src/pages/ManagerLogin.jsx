@@ -23,7 +23,10 @@ export default function ManagerLogin() {
     setLoading(true);
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      // Force-refresh the ID token so any custom claims (role: manager) set after
+      // the previous sign-in are included in the token sent to the backend.
+      await cred.user.getIdToken(true);
       navigate('/manager', { replace: true });
     } catch {
       setError('דואר אלקטרוני או סיסמה שגויים');
@@ -33,10 +36,18 @@ export default function ManagerLogin() {
   }
 
   async function handleSeed() {
+    // In production the endpoint requires an admin secret configured in Railway env vars.
+    // Prompt for it so the button works in both dev and prod environments.
+    const secret = window.prompt(
+      'הזן את ADMIN_SECRET מסביבת Railway (בסביבת פיתוח ניתן להשאיר ריק):',
+      '',
+    );
+    if (secret === null) return; // user cancelled
     setSeeding(true);
     try {
-      await api.seedData();
-      alert('נתוני בדיקה נוצרו בהצלחה!\nמנהל: admin@company.com / Admin123456');
+      const result = await api.seedData(secret || undefined);
+      if (result.error) throw new Error(result.error);
+      alert('נתוני בדיקה נוצרו בהצלחה!\nמנהל: admin@company.com / Admin123456\nכעת התחבר כדי שהתפקיד ייטען בתוקף.');
     } catch (err) {
       alert('שגיאה: ' + err.message);
     } finally {

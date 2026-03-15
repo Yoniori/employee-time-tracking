@@ -75,11 +75,11 @@ router.post('/', verifyToken, requireManager, async (req, res) => {
 });
 
 // GET /api/shifts — manager lists shifts; optional ?from=YYYY-MM-DD&to=YYYY-MM-DD
-// Uses single-field date index (auto-created by Firestore) — no composite index needed
+// Uses a single-field equality-free scan limited to 500 docs, filtered in JS.
+// This avoids composite-index requirements (range + orderBy) on the date field.
 router.get('/', verifyToken, requireManager, async (req, res) => {
   try {
     const { from, to } = req.query;
-    // Default: show shifts from today onwards (7-day window)
     const rangeFrom = from || todayInIsrael();
     const rangeTo = to || (() => {
       const d = new Date();
@@ -87,15 +87,20 @@ router.get('/', verifyToken, requireManager, async (req, res) => {
       return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
     })();
 
-    let query = db.collection('shifts')
+    // Single-field range filter (no composite index needed — no explicit orderBy).
+    // Upper bound filtered in JS; Firestore auto-index on `date` handles the >= clause.
+    const snap = await db.collection('shifts')
       .where('date', '>=', rangeFrom)
-      .where('date', '<=', rangeTo)
-      .orderBy('date', 'asc');
+      .limit(500)
+      .get();
+    const shifts = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(s => s.date <= rangeTo)
+      .sort((a, b) => a.date.localeCompare(b.date));
 
-    const snap = await query.limit(500).get();
-    res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    res.json(shifts);
   } catch (err) {
-    console.error(err);
+    console.error('[GET /shifts]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -130,16 +135,21 @@ router.post('/slots', verifyToken, requireManager, async (req, res) => {
 });
 
 // GET /api/shifts/slots — manager lists upcoming open slots
+// Fetch + JS-filter to avoid composite index on (date range + orderBy)
 router.get('/slots', verifyToken, requireManager, async (req, res) => {
   try {
     const today = todayInIsrael();
+    // Single-field range filter — no composite index needed (no separate orderBy field)
     const snap = await db.collection('shiftSlots')
       .where('date', '>=', today)
-      .orderBy('date', 'asc')
       .limit(200)
       .get();
-    res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const slots = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    res.json(slots);
   } catch (err) {
+    console.error('[GET /shifts/slots]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -168,11 +178,12 @@ router.get('/open-slots', verifyToken, async (req, res) => {
     const today = todayInIsrael();
     const slotsSnap = await db.collection('shiftSlots')
       .where('date', '>=', today)
-      .orderBy('date', 'asc')
       .limit(50)
       .get();
-    if (slotsSnap.empty) return res.json([]);
-    const slots = slotsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const slots = slotsSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (slots.length === 0) return res.json([]);
 
     // Check which slots this employee already requested (single equality — auto-index)
     const requestsSnap = await db.collection('shiftRequests')
@@ -247,6 +258,7 @@ router.get('/requests', verifyToken, requireManager, async (req, res) => {
       });
     res.json(requests);
   } catch (err) {
+    console.error('[GET /shifts/requests]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -292,6 +304,7 @@ router.post('/requests/:id/reject', verifyToken, requireManager, async (req, res
     await reqDoc.ref.update({ status: 'rejected', reviewedAt: new Date() });
     res.json({ ok: true });
   } catch (err) {
+    console.error('[POST /shifts/requests/:id/reject]', err);
     res.status(500).json({ error: err.message });
   }
 });

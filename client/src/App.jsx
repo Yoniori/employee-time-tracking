@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import EmployeeLogin from './pages/EmployeeLogin';
 import EmployeeDashboard from './pages/EmployeeDashboard';
+import EmployeeSignup from './pages/EmployeeSignup';
 import ManagerLogin from './pages/ManagerLogin';
 import ManagerDashboard from './pages/ManagerDashboard';
 
@@ -36,6 +37,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<EmployeeLogin />} />
+          <Route path="/signup" element={<EmployeeSignup />} />
           <Route path="/dashboard" element={
             <EmployeeRoute><EmployeeDashboard /></EmployeeRoute>
           } />

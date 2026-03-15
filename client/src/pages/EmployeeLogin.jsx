@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { api } from '../lib/api';
@@ -228,10 +228,13 @@ export default function EmployeeLogin() {
                 </button>
               </form>
 
-              <div className="mt-6 pt-5 border-t border-gray-100 text-center">
-                <a href="/manager/login" className="text-sm text-gray-400 hover:text-indigo-600 transition-colors">
+              <div className="mt-6 pt-5 border-t border-gray-100 text-center space-y-2">
+                <Link to="/signup" className="block text-sm font-bold text-indigo-600 hover:text-indigo-800 transition-colors">
+                  עובד חדש? להרשמה לחץ כאן
+                </Link>
+                <Link to="/manager/login" className="block text-sm text-gray-400 hover:text-indigo-600 transition-colors">
                   כניסת מנהל
-                </a>
+                </Link>
               </div>
             </>
           )}

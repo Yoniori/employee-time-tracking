@@ -35,10 +35,17 @@ router.post('/lookup-employee', async (req, res) => {
   }
 });
 
-// Seed manager account (one-time setup — disabled in production)
+// Seed manager account (one-time setup).
+// In production the endpoint is locked behind ADMIN_SECRET — pass the secret in
+// the X-Admin-Secret request header.  In development it works without a secret.
 router.post('/seed-manager', async (req, res) => {
   if (process.env.NODE_ENV === 'production') {
-    return res.status(404).json({ error: 'Not found' });
+    const adminSecret = process.env.ADMIN_SECRET;
+    const providedSecret = req.headers['x-admin-secret'];
+    if (!adminSecret || providedSecret !== adminSecret) {
+      // Return 404 (not 403) so the endpoint isn't discoverable in prod
+      return res.status(404).json({ error: 'Not found' });
+    }
   }
   try {
     let userRecord;

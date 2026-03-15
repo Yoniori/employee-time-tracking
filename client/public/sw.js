@@ -1,4 +1,4 @@
-const CACHE_NAME = 'time-tracking-v4';
+const CACHE_NAME = 'time-tracking-v5';
 
 // Only cache immutable hashed assets - never cache index.html
 const IMMUTABLE_PATTERN = /\/assets\/.+\.(js|css|woff2?|png|svg|ico)$/;
@@ -9,12 +9,13 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
+  // Delete all old caches, then claim clients.
+  // Do NOT navigate clients — forcing navigation while the new JS bundle is not yet
+  // cached causes "Failed to fetch" errors. The next normal page load picks up the new SW.
   event.waitUntil(
     caches.keys()
       .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: 'window' }))
-      .then(clients => clients.forEach(client => client.navigate(client.url)))
   );
 });
 

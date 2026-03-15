@@ -84,8 +84,11 @@ export const api = {
       return d;
     }),
 
-  seedData: () =>
-    fetch(`${BASE}/api/auth/seed-manager`, { method: 'POST' }).then(r => r.json()),
+  seedData: (adminSecret) =>
+    fetch(`${BASE}/api/auth/seed-manager`, {
+      method: 'POST',
+      headers: adminSecret ? { 'x-admin-secret': adminSecret } : {},
+    }).then(r => r.json()),
 
   // Shifts
   createShift: (data) =>
@@ -135,4 +138,26 @@ export const api = {
   // Sheets
   syncSheets: (spreadsheetId) =>
     request('/api/sheets/sync', { method: 'POST', body: { spreadsheetId } }),
+
+  // Employee self-registration
+  // submitSignupRequest is public — no auth token needed
+  submitSignupRequest: (data) =>
+    fetch(`${BASE}/api/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }).then(async r => {
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'שגיאה בשליחת הבקשה');
+      return d;
+    }),
+
+  getSignupRequests: () =>
+    request('/api/signup/requests'),
+
+  approveSignupRequest: (id) =>
+    request(`/api/signup/requests/${id}/approve`, { method: 'POST' }),
+
+  rejectSignupRequest: (id) =>
+    request(`/api/signup/requests/${id}/reject`, { method: 'POST' }),
 };

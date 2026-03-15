@@ -453,12 +453,44 @@ function EmployeesTab() {
   const [locSaving, setLocSaving] = useState(false);
   const [locError, setLocError] = useState('');
 
-  useEffect(() => { loadEmployees(); }, []);
+  // ── Signup requests ────────────────────────────────────────────────────────
+  const [signupRequests, setSignupRequests] = useState([]);
+  const [signupLoading, setSignupLoading] = useState(true);
+  const [reviewingSignupId, setReviewingSignupId] = useState(null);
+
+  useEffect(() => { loadEmployees(); loadSignupRequests(); }, []); // eslint-disable-line
 
   async function loadEmployees() {
     setLoading(true);
     try { setEmployees(await api.getEmployees()); }
     catch { /* ignore */ } finally { setLoading(false); }
+  }
+
+  async function loadSignupRequests() {
+    setSignupLoading(true);
+    try { setSignupRequests(await api.getSignupRequests()); }
+    catch { /* ignore */ } finally { setSignupLoading(false); }
+  }
+
+  async function handleApproveSignup(id) {
+    setReviewingSignupId(id);
+    try {
+      await api.approveSignupRequest(id);
+      // Refresh both lists: request disappears, new employee appears
+      loadSignupRequests();
+      loadEmployees();
+    } catch (err) { alert('שגיאה: ' + err.message); }
+    finally { setReviewingSignupId(null); }
+  }
+
+  async function handleRejectSignup(id) {
+    if (!confirm('לדחות בקשת הצטרפות זו?')) return;
+    setReviewingSignupId(id);
+    try {
+      await api.rejectSignupRequest(id);
+      loadSignupRequests();
+    } catch (err) { alert('שגיאה: ' + err.message); }
+    finally { setReviewingSignupId(null); }
   }
 
   async function geocodeAddress(address) {
@@ -559,6 +591,80 @@ function EmployeesTab() {
 
   return (
     <div className="p-4">
+
+      {/* ── Signup Requests Section ──────────────────────────────────────────── */}
+      {(signupLoading || signupRequests.length > 0) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5">
+          <div className="flex items-center gap-2 mb-3">
+            <svg className="w-5 h-5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" strokeLinecap="round" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M19 8v6M22 11h-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <h3 className="font-semibold text-amber-800 text-sm">בקשות הצטרפות</h3>
+            {signupRequests.length > 0 && (
+              <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                {signupRequests.length}
+              </span>
+            )}
+          </div>
+
+          {signupLoading ? (
+            <Spinner />
+          ) : (
+            <div className="space-y-2.5">
+              {signupRequests.map(req => {
+                // createdAt comes back from the API as a Firestore Timestamp serialised
+                // as { seconds, nanoseconds } — convert to a readable date.
+                const dateStr = req.createdAt?.seconds
+                  ? new Date(req.createdAt.seconds * 1000).toLocaleDateString('he-IL')
+                  : '';
+                const isReviewing = reviewingSignupId === req.id;
+                return (
+                  <div key={req.id} className="bg-white rounded-xl p-3.5 border border-amber-100 shadow-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-800 text-sm">{req.fullName}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          ת.ז.&nbsp;{req.idNumber}
+                          &nbsp;·&nbsp;
+                          <span dir="ltr">{req.phone}</span>
+                        </p>
+                        {req.note && (
+                          <p className="text-xs text-gray-400 mt-1 italic bg-gray-50 rounded-lg px-2 py-1">
+                            "{req.note}"
+                          </p>
+                        )}
+                        {dateStr && (
+                          <p className="text-xs text-gray-300 mt-1">{dateStr}</p>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1.5 shrink-0">
+                        <button
+                          onClick={() => handleApproveSignup(req.id)}
+                          disabled={isReviewing}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          {isReviewing ? '...' : '✓ אשר'}
+                        </button>
+                        <button
+                          onClick={() => handleRejectSignup(req.id)}
+                          disabled={isReviewing}
+                          className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap border border-red-100"
+                        >
+                          ✕ דחה
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Employee management header ────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-bold text-gray-800">ניהול עובדים ({employees.length})</h2>
         <button onClick={() => setShowForm(!showForm)}
@@ -1245,8 +1351,15 @@ function ShiftsTab() {
   });
 
   useEffect(() => {
-    api.getEmployees().then(setEmployees).catch(() => {});
-    loadShifts();
+    // Force-refresh the Firebase ID token so the manager role custom claim is always
+    // present — covers both fresh logins and persisted sessions where the token was
+    // cached before setCustomUserClaims() was called.
+    async function init() {
+      try { await auth.currentUser?.getIdToken(true); } catch {}
+      api.getEmployees().then(setEmployees).catch(() => {});
+      loadShifts();
+    }
+    init();
   }, []); // eslint-disable-line
 
   // Load slots + requests when switching to slots view
