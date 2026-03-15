@@ -4,6 +4,19 @@ const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
 
+// Normalise any Israeli phone number to E.164 (+972...).
+// Used to compare stored phone numbers against the Firebase phone_number JWT claim,
+// which Firebase ALWAYS returns in E.164 format regardless of how the OTP was requested.
+// This makes all ownership checks and phone lookups format-agnostic.
+function normalizePhone(phone) {
+  if (!phone) return '';
+  const digits = String(phone).replace(/[\s\-().]/g, '');
+  if (digits.startsWith('+')) return digits;          // already E.164
+  if (digits.startsWith('972')) return '+' + digits;  // 972501234567
+  if (digits.startsWith('0')) return '+972' + digits.slice(1); // 0501234567
+  return '+972' + digits;                             // bare digits
+}
+
 // Returns today's date as "YYYY-MM-DD" in Israel time
 function todayInIsrael() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
@@ -33,8 +46,9 @@ router.post('/clock-in', verifyToken, async (req, res) => {
     if (!empDoc.exists) return res.status(404).json({ error: 'עובד לא נמצא' });
     const emp = empDoc.data();
 
-    // Ownership check: the authenticated phone must match this employee's phone
-    if (req.user.phone_number !== emp.phone) {
+    // Ownership check: normalize both sides to E.164 so that a stored "0..." local
+    // format and a Firebase-issued "+972..." claim compare correctly.
+    if (normalizePhone(req.user.phone_number) !== normalizePhone(emp.phone)) {
       return res.status(403).json({ error: 'אין הרשאה לבצע פעולה זו' });
     }
 
@@ -128,8 +142,8 @@ router.post('/clock-out', verifyToken, async (req, res) => {
     if (!empDoc.exists) return res.status(404).json({ error: 'עובד לא נמצא' });
     const emp = empDoc.data();
 
-    // Ownership check
-    if (req.user.phone_number !== emp.phone) {
+    // Ownership check — same format-agnostic comparison as clock-in
+    if (normalizePhone(req.user.phone_number) !== normalizePhone(emp.phone)) {
       return res.status(403).json({ error: 'אין הרשאה לבצע פעולה זו' });
     }
 
@@ -166,7 +180,8 @@ router.get('/status/:employeeId', verifyToken, async (req, res) => {
     // Managers can check any employee; employees can only check themselves
     if (req.user.role !== 'manager') {
       const empDoc = await db.collection('employees').doc(empId).get();
-      if (!empDoc.exists || empDoc.data().phone !== req.user.phone_number) {
+      if (!empDoc.exists ||
+          normalizePhone(empDoc.data().phone) !== normalizePhone(req.user.phone_number)) {
         return res.status(403).json({ error: 'אין הרשאה לבצע פעולה זו' });
       }
     }
@@ -195,8 +210,15 @@ router.get('/my', verifyToken, async (req, res) => {
     const phone = req.user.phone_number;
     if (!phone) return res.status(400).json({ error: 'מספר טלפון לא זמין' });
 
+    // Firebase always issues E.164 phone_number claims (+972...).
+    // Older records (e.g. manually created) may be stored as local "0..." format.
+    // Query both variants so lookup works regardless of storage format.
+    const e164 = normalizePhone(phone);
+    const local = '0' + e164.replace(/^\+972/, '');  // "+972XXXXXXXX" → "0XXXXXXXX"
+    const phoneVariants = e164 === local ? [e164] : [e164, local];
+
     const empSnap = await db.collection('employees')
-      .where('phone', '==', phone)
+      .where('phone', 'in', phoneVariants)
       .limit(1).get();
     if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
     const employeeId = empSnap.docs[0].id;

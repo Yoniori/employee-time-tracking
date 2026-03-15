@@ -6,13 +6,28 @@ const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
 
+// Normalise any Israeli phone number to E.164 (+972...).
+// All employee records are stored in this format so that the Firebase phone_number
+// JWT claim (always E.164) can be compared against Firestore data correctly.
 function normalizePhone(phone) {
   if (!phone) return phone;
-  const digits = phone.replace(/[\s\-().]/g, '');
-  if (digits.startsWith('+')) return digits;
-  if (digits.startsWith('972')) return '+' + digits;
-  if (digits.startsWith('0')) return '+972' + digits.slice(1);
-  return '+972' + digits;
+  const digits = String(phone).replace(/[\s\-().]/g, '');
+  if (digits.startsWith('+')) return digits;           // already E.164
+  if (digits.startsWith('972')) return '+' + digits;   // 972501234567
+  if (digits.startsWith('0')) return '+972' + digits.slice(1); // 0501234567
+  return '+972' + digits;                              // bare local digits
+}
+
+// Validate that the normalised number looks like a real Israeli mobile number.
+// Israeli mobiles are +972 5X XXXXXXX — 9 digits after the country code, starting with 5.
+function validateIsraeliPhone(phone) {
+  if (!phone) return 'מספר טלפון הוא שדה חובה';
+  const e164 = normalizePhone(phone);
+  // +972 followed by exactly 9 digits starting with 5 (e.g. +972501234567)
+  if (!/^\+9725\d{8}$/.test(e164)) {
+    return 'מספר טלפון לא תקין — יש להזין מספר נייד ישראלי (לדוגמה: 0501234567 או +972501234567)';
+  }
+  return null; // valid
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -32,7 +47,11 @@ router.get('/', verifyToken, requireManager, async (req, res) => {
 router.post('/', verifyToken, requireManager, async (req, res) => {
   try {
     const data = { ...req.body, active: true, createdAt: new Date() };
-    if (data.phone) data.phone = normalizePhone(data.phone);
+    if (data.phone) {
+      const phoneError = validateIsraeliPhone(data.phone);
+      if (phoneError) return res.status(400).json({ error: phoneError });
+      data.phone = normalizePhone(data.phone);
+    }
     const ref = await db.collection('employees').add(data);
     res.json({ id: ref.id, ...data });
   } catch (err) {
@@ -44,7 +63,11 @@ router.post('/', verifyToken, requireManager, async (req, res) => {
 router.put('/:id', verifyToken, requireManager, async (req, res) => {
   try {
     const data = { ...req.body };
-    if (data.phone) data.phone = normalizePhone(data.phone);
+    if (data.phone) {
+      const phoneError = validateIsraeliPhone(data.phone);
+      if (phoneError) return res.status(400).json({ error: phoneError });
+      data.phone = normalizePhone(data.phone);
+    }
     await db.collection('employees').doc(req.params.id).update(data);
     res.json({ success: true });
   } catch (err) {
@@ -81,6 +104,13 @@ router.post('/upload-csv', verifyToken, requireManager, upload.single('file'), a
       const lng = parseFloat(row['קו_אורך'] || row['lng'] || 0);
 
       if (!name || !idNumber || !phone) continue;
+
+      // Validate phone before normalising — skip and report invalid rows
+      const phoneError = validateIsraeliPhone(phone);
+      if (phoneError) {
+        results.push({ idNumber, action: 'skipped', reason: phoneError });
+        continue;
+      }
 
       // Check if exists
       const existing = await db.collection('employees')
