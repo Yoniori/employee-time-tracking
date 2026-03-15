@@ -1342,6 +1342,10 @@ function ShiftsTab() {
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [reviewingId, setReviewingId]         = useState(null); // id being approved/rejected
 
+  // Slot detail panel — lazy-loaded per slot, cached by slotId
+  const [expandedSlotId, setExpandedSlotId]   = useState(null);
+  const [slotRequestsMap, setSlotRequestsMap] = useState({}); // { [slotId]: { loading, data } }
+
   const [form, setForm] = useState({
     employeeId: '',
     date: todayISO,
@@ -1385,6 +1389,30 @@ function ShiftsTab() {
     catch { /* ignore */ } finally { setSlotsLoading(false); }
   }
 
+  // Fetch requests for one slot — called lazily when manager taps a slot card.
+  // Results are cached in slotRequestsMap so re-opens don't re-fetch.
+  async function fetchSlotDetail(slotId) {
+    setSlotRequestsMap(m => ({ ...m, [slotId]: { loading: true, data: [] } }));
+    try {
+      const data = await api.getSlotRequests(slotId);
+      setSlotRequestsMap(m => ({ ...m, [slotId]: { loading: false, data } }));
+    } catch {
+      setSlotRequestsMap(m => ({ ...m, [slotId]: { loading: false, data: [] } }));
+    }
+  }
+
+  function openSlotDetail(slotId) {
+    if (expandedSlotId === slotId) {
+      setExpandedSlotId(null); // collapse
+      return;
+    }
+    setExpandedSlotId(slotId);
+    // Only fetch if not already cached
+    if (!slotRequestsMap[slotId]) {
+      fetchSlotDetail(slotId);
+    }
+  }
+
   async function loadRequests() {
     setRequestsLoading(true);
     try { setRequests(await api.getShiftRequests()); }
@@ -1411,14 +1439,25 @@ function ShiftsTab() {
 
   async function handleApprove(reqId) {
     setReviewingId(reqId);
-    try { await api.approveRequest(reqId); loadRequests(); loadShifts(); }
+    try {
+      await api.approveRequest(reqId);
+      loadRequests();
+      loadShifts();
+      // Refresh detail panel for the open slot so counts update
+      if (expandedSlotId) fetchSlotDetail(expandedSlotId);
+    }
     catch (err) { alert('שגיאה: ' + err.message); }
     finally { setReviewingId(null); }
   }
 
   async function handleReject(reqId) {
     setReviewingId(reqId);
-    try { await api.rejectRequest(reqId); loadRequests(); }
+    try {
+      await api.rejectRequest(reqId);
+      loadRequests();
+      // Refresh detail panel for the open slot so counts update
+      if (expandedSlotId) fetchSlotDetail(expandedSlotId);
+    }
     catch (err) { alert('שגיאה: ' + err.message); }
     finally { setReviewingId(null); }
   }
@@ -1727,30 +1766,190 @@ function ShiftsTab() {
               <EmptyState icon="🎯" text="אין משמרות פתוחות לבקשה" />
             ) : (
               <div className="space-y-2">
-                {slots.map(sl => (
-                  <div key={sl.id} className="bg-white rounded-2xl shadow-sm px-4 py-3 flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
-                      <svg className="w-4 h-4 text-violet-600" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
-                      </svg>
+                {slots.map(sl => {
+                  const isOpen   = expandedSlotId === sl.id;
+                  const detail   = slotRequestsMap[sl.id];
+                  const approved = detail?.data.filter(r => r.status === 'approved') ?? [];
+                  const pending  = detail?.data.filter(r => r.status === 'pending')  ?? [];
+                  const rejected = detail?.data.filter(r => r.status === 'rejected') ?? [];
+
+                  return (
+                    <div key={sl.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+
+                      {/* ── Clickable slot header row ── */}
+                      <div
+                        onClick={() => openSlotDetail(sl.id)}
+                        className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+                          <svg className="w-4 h-4 text-violet-600" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-800 text-sm">{sl.title}</p>
+                          <p className="text-xs text-gray-400">
+                            {new Date(sl.date + 'T00:00:00').toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' })}
+                            {sl.workSite ? ` · ${sl.workSite}` : ''}
+                            {` · ${sl.positions} מקומות`}
+                            {/* Show request counts once loaded */}
+                            {detail && !detail.loading && (
+                              <span className="mr-1">
+                                {' · '}
+                                <span className="text-emerald-600 font-medium">{approved.length}✓</span>
+                                {' '}
+                                <span className="text-amber-500 font-medium">{pending.length}⏳</span>
+                                {' '}
+                                <span className="text-red-400 font-medium">{rejected.length}✗</span>
+                              </span>
+                            )}
+                          </p>
+                        </div>
+
+                        <p className="font-mono text-indigo-600 text-sm font-bold shrink-0" dir="ltr">{sl.startTime}–{sl.endTime}</p>
+
+                        {/* Chevron toggle */}
+                        <svg
+                          className={`w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                          viewBox="0 0 20 20" fill="currentColor"
+                        >
+                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+
+                        {/* Delete — stopPropagation so click doesn't toggle detail */}
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDeleteSlot(sl.id); }}
+                          className="text-gray-300 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 shrink-0"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+
+                      {/* ── Expandable detail panel ── */}
+                      {isOpen && (
+                        <div className="border-t border-gray-100 px-4 pt-3 pb-4 space-y-3">
+
+                          {/* Loading state */}
+                          {detail?.loading && (
+                            <div className="flex justify-center py-4">
+                              <svg className="animate-spin h-5 w-5 text-violet-400" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                              </svg>
+                            </div>
+                          )}
+
+                          {detail && !detail.loading && detail.data.length === 0 && (
+                            <p className="text-xs text-gray-400 text-center py-2">אין בקשות לסלוט זה עדיין</p>
+                          )}
+
+                          {/* ── מאושרים ── */}
+                          {approved.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-emerald-700 mb-1.5 flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                                מאושרים ({approved.length})
+                              </p>
+                              <div className="space-y-1.5">
+                                {approved.map(r => (
+                                  <div key={r.id} className="flex items-center gap-2 bg-emerald-50 rounded-xl px-3 py-2">
+                                    <Avatar name={r.employeeName} size="sm" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium text-gray-800 truncate">{r.employeeName}</p>
+                                      {r.employeeId && <p className="text-xs text-gray-400">ת.ז. {r.employeeId}</p>}
+                                    </div>
+                                    {r.createdAt && (
+                                      <p className="text-xs text-gray-400 shrink-0">
+                                        {new Date(r.createdAt.toDate?.() ?? r.createdAt).toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' })}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ── ממתינים ── */}
+                          {pending.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-amber-700 mb-1.5 flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+                                ממתינים ({pending.length})
+                              </p>
+                              <div className="space-y-1.5">
+                                {pending.map(r => {
+                                  const busy = reviewingId === r.id;
+                                  return (
+                                    <div key={r.id} className="bg-amber-50 rounded-xl px-3 py-2">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <Avatar name={r.employeeName} size="sm" />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-medium text-gray-800 truncate">{r.employeeName}</p>
+                                          {r.employeeId && <p className="text-xs text-gray-400">ת.ז. {r.employeeId}</p>}
+                                        </div>
+                                        {r.createdAt && (
+                                          <p className="text-xs text-gray-400 shrink-0">
+                                            {new Date(r.createdAt.toDate?.() ?? r.createdAt).toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' })}
+                                          </p>
+                                        )}
+                                      </div>
+                                      <div className="flex gap-2">
+                                        <button
+                                          onClick={() => handleApprove(r.id)}
+                                          disabled={busy}
+                                          className="flex-1 bg-emerald-500 text-white rounded-lg py-1.5 text-xs font-semibold disabled:opacity-40"
+                                        >
+                                          {busy ? '...' : '✓ אשר'}
+                                        </button>
+                                        <button
+                                          onClick={() => handleReject(r.id)}
+                                          disabled={busy}
+                                          className="flex-1 bg-white border border-red-200 text-red-500 rounded-lg py-1.5 text-xs font-semibold disabled:opacity-40"
+                                        >
+                                          ✗ דחה
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ── נדחו ── */}
+                          {rejected.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-red-500 mb-1.5 flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+                                נדחו ({rejected.length})
+                              </p>
+                              <div className="space-y-1.5">
+                                {rejected.map(r => (
+                                  <div key={r.id} className="flex items-center gap-2 bg-red-50 rounded-xl px-3 py-2">
+                                    <Avatar name={r.employeeName} size="sm" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium text-gray-500 truncate">{r.employeeName}</p>
+                                      {r.employeeId && <p className="text-xs text-gray-400">ת.ז. {r.employeeId}</p>}
+                                    </div>
+                                    {r.createdAt && (
+                                      <p className="text-xs text-gray-400 shrink-0">
+                                        {new Date(r.createdAt.toDate?.() ?? r.createdAt).toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' })}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                        </div>
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800 text-sm">{sl.title}</p>
-                      <p className="text-xs text-gray-400">
-                        {new Date(sl.date + 'T00:00:00').toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' })}
-                        {sl.workSite ? ` · ${sl.workSite}` : ''}
-                        {` · ${sl.positions} מקומות`}
-                      </p>
-                    </div>
-                    <p className="font-mono text-indigo-600 text-sm font-bold shrink-0" dir="ltr">{sl.startTime}–{sl.endTime}</p>
-                    <button onClick={() => handleDeleteSlot(sl.id)}
-                      className="text-gray-300 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 shrink-0">
-                      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

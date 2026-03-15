@@ -154,6 +154,28 @@ router.get('/slots', verifyToken, requireManager, async (req, res) => {
   }
 });
 
+// GET /api/shifts/slots/:id/requests — manager sees ALL requests for one slot (all statuses)
+// Single equality filter on slotId — uses Firestore auto-index, no composite index needed.
+router.get('/slots/:id/requests', verifyToken, requireManager, async (req, res) => {
+  try {
+    const snap = await db.collection('shiftRequests')
+      .where('slotId', '==', req.params.id)
+      .limit(100)
+      .get();
+    const requests = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        const ta = a.createdAt?.toMillis?.() ?? 0;
+        const tb = b.createdAt?.toMillis?.() ?? 0;
+        return ta - tb;
+      });
+    res.json(requests);
+  } catch (err) {
+    console.error('[GET /shifts/slots/:id/requests]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE /api/shifts/slots/:id — manager deletes a slot
 router.delete('/slots/:id', verifyToken, requireManager, async (req, res) => {
   try {

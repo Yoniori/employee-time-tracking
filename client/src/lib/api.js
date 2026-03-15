@@ -118,6 +118,10 @@ export const api = {
   deleteSlot: (id) =>
     request(`/api/shifts/slots/${id}`, { method: 'DELETE' }),
 
+  // All requests (all statuses) for one specific slot — fetched on-demand when manager opens a slot
+  getSlotRequests: (slotId) =>
+    request(`/api/shifts/slots/${slotId}/requests`),
+
   // Shift requests (employee)
   getOpenSlots: () =>
     request('/api/shifts/open-slots'),
