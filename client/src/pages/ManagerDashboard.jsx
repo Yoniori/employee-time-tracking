@@ -291,17 +291,36 @@ function RecordsTab() {
     }
   }
 
+  // Overtime breakdown per Israeli labour rules:
+  //   hours 1–8   → regular (100%)
+  //   hours 9–10  → overtime at 125%
+  //   hours 11+   → overtime at 150%
+  function calcOvertime(totalHours) {
+    const h = totalHours || 0;
+    return {
+      regular:  parseFloat(Math.min(h, 8).toFixed(2)),
+      ot125:    parseFloat(Math.min(Math.max(h - 8, 0), 2).toFixed(2)),
+      ot150:    parseFloat(Math.max(h - 10, 0).toFixed(2)),
+    };
+  }
+
   function exportExcel() {
-    const header = ['שם עובד', 'ת.ז.', 'אתר עבודה', 'תאריך', 'כניסה', 'יציאה', 'שעות'];
-    const rows = filtered.map(r => [
-      r.employeeName,
-      r.idNumber,
-      r.workSite,
-      r.clockIn ? new Date(r.clockIn).toLocaleDateString('he-IL') : '',
-      r.clockIn ? new Date(r.clockIn).toLocaleTimeString('he-IL') : '',
-      r.clockOut ? new Date(r.clockOut).toLocaleTimeString('he-IL') : '',
-      r.totalHours?.toFixed(2) || '',
-    ]);
+    const header = ['שם עובד', 'ת.ז.', 'אתר עבודה', 'תאריך', 'כניסה', 'יציאה', 'שעות סה"כ', 'רגילות', 'גמול 125%', 'גמול 150%'];
+    const rows = filtered.map(r => {
+      const { regular, ot125, ot150 } = calcOvertime(r.totalHours);
+      return [
+        r.employeeName,
+        r.idNumber,
+        r.workSite,
+        r.clockIn ? new Date(r.clockIn).toLocaleDateString('he-IL') : '',
+        r.clockIn ? new Date(r.clockIn).toLocaleTimeString('he-IL') : '',
+        r.clockOut ? new Date(r.clockOut).toLocaleTimeString('he-IL') : '',
+        r.totalHours?.toFixed(2) || '',
+        regular,
+        ot125,
+        ot150,
+      ];
+    });
     const csv = [header, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
