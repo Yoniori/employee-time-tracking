@@ -4,6 +4,25 @@ const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
 
+// Normalise any Israeli phone number to E.164 (+972...).
+// Firebase always issues phone_number JWT claims in E.164, but employee records
+// may be stored as local "0..." format.  Build both variants and use Firestore
+// 'in' so the lookup works regardless of which format is stored.
+function normalizePhone(phone) {
+  if (!phone) return '';
+  const digits = String(phone).replace(/[\s\-().]/g, '');
+  if (digits.startsWith('+')) return digits;
+  if (digits.startsWith('972')) return '+' + digits;
+  if (digits.startsWith('0')) return '+972' + digits.slice(1);
+  return '+972' + digits;
+}
+
+function phoneVariants(rawPhone) {
+  const e164 = normalizePhone(rawPhone);
+  const local = '0' + e164.replace(/^\+972/, '');
+  return e164 === local ? [e164] : [e164, local];
+}
+
 // Returns today's date as "YYYY-MM-DD" in Israel time
 function todayInIsrael() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
@@ -142,7 +161,7 @@ router.get('/open-slots', verifyToken, async (req, res) => {
     const phone = req.user.phone_number;
     if (!phone) return res.status(400).json({ error: 'מספר טלפון לא זמין' });
 
-    const empSnap = await db.collection('employees').where('phone', '==', phone).limit(1).get();
+    const empSnap = await db.collection('employees').where('phone', 'in', phoneVariants(phone)).limit(1).get();
     if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
     const employeeId = empSnap.docs[0].id;
 
@@ -174,7 +193,7 @@ router.post('/open-slots/:slotId/request', verifyToken, async (req, res) => {
     const phone = req.user.phone_number;
     if (!phone) return res.status(400).json({ error: 'מספר טלפון לא זמין' });
 
-    const empSnap = await db.collection('employees').where('phone', '==', phone).limit(1).get();
+    const empSnap = await db.collection('employees').where('phone', 'in', phoneVariants(phone)).limit(1).get();
     if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
     const employeeId = empSnap.docs[0].id;
     const employeeName = empSnap.docs[0].data().name;
@@ -362,7 +381,7 @@ router.get('/my', verifyToken, async (req, res) => {
     if (!phone) return res.status(400).json({ error: 'מספר טלפון לא זמין' });
 
     const empSnap = await db.collection('employees')
-      .where('phone', '==', phone)
+      .where('phone', 'in', phoneVariants(phone))
       .limit(1)
       .get();
     if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
