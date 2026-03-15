@@ -105,6 +105,33 @@ export const api = {
   getMyShifts: () =>
     request('/api/shifts/my'),
 
+  // Shift slots (manager)
+  createSlot: (data) =>
+    request('/api/shifts/slots', { method: 'POST', body: data }),
+
+  getSlots: () =>
+    request('/api/shifts/slots'),
+
+  deleteSlot: (id) =>
+    request(`/api/shifts/slots/${id}`, { method: 'DELETE' }),
+
+  // Shift requests (employee)
+  getOpenSlots: () =>
+    request('/api/shifts/open-slots'),
+
+  requestSlot: (slotId) =>
+    request(`/api/shifts/open-slots/${slotId}/request`, { method: 'POST' }),
+
+  // Shift requests (manager)
+  getShiftRequests: () =>
+    request('/api/shifts/requests'),
+
+  approveRequest: (id) =>
+    request(`/api/shifts/requests/${id}/approve`, { method: 'POST' }),
+
+  rejectRequest: (id) =>
+    request(`/api/shifts/requests/${id}/reject`, { method: 'POST' }),
+
   // Sheets
   syncSheets: (spreadsheetId) =>
     request('/api/sheets/sync', { method: 'POST', body: { spreadsheetId } }),

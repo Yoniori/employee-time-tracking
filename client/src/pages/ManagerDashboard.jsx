@@ -1216,12 +1216,26 @@ function ShiftsTab() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [viewMode, setViewMode] = useState('list'); // 'list' | 'board'
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'board' | 'slots'
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // Default form values: today and sensible times
+  // Slots state
+  const [slots, setSlots]               = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [showSlotForm, setShowSlotForm] = useState(false);
+  const [slotSaving, setSlotSaving]     = useState(false);
+  const [slotFormError, setSlotFormError] = useState('');
   const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+  const [slotForm, setSlotForm] = useState({
+    title: '', date: todayISO, startTime: '08:00', endTime: '17:00', workSite: '', positions: 1,
+  });
+
+  // Requests state
+  const [requests, setRequests]               = useState([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [reviewingId, setReviewingId]         = useState(null); // id being approved/rejected
+
   const [form, setForm] = useState({
     employeeId: '',
     date: todayISO,
@@ -1235,6 +1249,14 @@ function ShiftsTab() {
     loadShifts();
   }, []); // eslint-disable-line
 
+  // Load slots + requests when switching to slots view
+  useEffect(() => {
+    if (viewMode === 'slots') {
+      loadSlots();
+      loadRequests();
+    }
+  }, [viewMode]); // eslint-disable-line
+
   async function loadShifts() {
     setLoading(true);
     try {
@@ -1242,6 +1264,50 @@ function ShiftsTab() {
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
+  }
+
+  async function loadSlots() {
+    setSlotsLoading(true);
+    try { setSlots(await api.getSlots()); }
+    catch { /* ignore */ } finally { setSlotsLoading(false); }
+  }
+
+  async function loadRequests() {
+    setRequestsLoading(true);
+    try { setRequests(await api.getShiftRequests()); }
+    catch { /* ignore */ } finally { setRequestsLoading(false); }
+  }
+
+  async function handleCreateSlot(e) {
+    e.preventDefault(); setSlotFormError('');
+    setSlotSaving(true);
+    try {
+      await api.createSlot(slotForm);
+      setSlotForm({ title: '', date: todayISO, startTime: '08:00', endTime: '17:00', workSite: '', positions: 1 });
+      setShowSlotForm(false);
+      loadSlots();
+    } catch (err) { setSlotFormError(err.message); }
+    finally { setSlotSaving(false); }
+  }
+
+  async function handleDeleteSlot(id) {
+    if (!confirm('למחוק סלוט זה?')) return;
+    try { await api.deleteSlot(id); loadSlots(); }
+    catch (err) { alert('שגיאה: ' + err.message); }
+  }
+
+  async function handleApprove(reqId) {
+    setReviewingId(reqId);
+    try { await api.approveRequest(reqId); loadRequests(); loadShifts(); }
+    catch (err) { alert('שגיאה: ' + err.message); }
+    finally { setReviewingId(null); }
+  }
+
+  async function handleReject(reqId) {
+    setReviewingId(reqId);
+    try { await api.rejectRequest(reqId); loadRequests(); }
+    catch (err) { alert('שגיאה: ' + err.message); }
+    finally { setReviewingId(null); }
   }
 
   async function handleCreate(e) {
@@ -1316,9 +1382,13 @@ function ShiftsTab() {
         </div>
       </div>
 
-      {/* View toggle — list / board */}
+      {/* View toggle — list / board / slots */}
       <div className="flex bg-gray-100 rounded-xl p-1 mb-4">
-        {['list', 'board'].map(mode => (
+        {[
+          { mode: 'list',  label: '📋 רשימה' },
+          { mode: 'board', label: '📅 לוח שבועי' },
+          { mode: 'slots', label: `🎯 סלוטים${requests.length > 0 ? ` (${requests.length})` : ''}` },
+        ].map(({ mode, label }) => (
           <button
             key={mode}
             onClick={() => setViewMode(mode)}
@@ -1326,7 +1396,7 @@ function ShiftsTab() {
               viewMode === mode ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'
             }`}
           >
-            {mode === 'list' ? '📋 רשימה' : '📅 לוח שבועי'}
+            {label}
           </button>
         ))}
       </div>
@@ -1476,6 +1546,149 @@ function ShiftsTab() {
       {/* ── Board view ── */}
       {!loading && viewMode === 'board' && (
         <WeeklyBoard shifts={shifts} />
+      )}
+
+      {/* ── Slots view ── */}
+      {viewMode === 'slots' && (
+        <div className="space-y-5">
+
+          {/* Open Slots section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-700 text-sm">משמרות פתוחות לבקשה</h3>
+              <button
+                onClick={() => { setShowSlotForm(!showSlotForm); setSlotFormError(''); }}
+                className="flex items-center gap-1 bg-violet-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                </svg>
+                סלוט חדש
+              </button>
+            </div>
+
+            {/* Create slot form */}
+            {showSlotForm && (
+              <div className="bg-white rounded-2xl shadow-sm p-4 mb-3 border border-violet-100">
+                <form onSubmit={handleCreateSlot} className="space-y-2.5">
+                  <input required value={slotForm.title}
+                    onChange={e => setSlotForm(f => ({ ...f, title: e.target.value }))}
+                    placeholder="כותרת (לדוגמה: כוח אדם לאירוע)"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input required type="date" value={slotForm.date}
+                      onChange={e => setSlotForm(f => ({ ...f, date: e.target.value }))}
+                      className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+                    <input value={slotForm.workSite}
+                      onChange={e => setSlotForm(f => ({ ...f, workSite: e.target.value }))}
+                      placeholder="אתר (אופציונלי)"
+                      className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+                    <input required type="time" value={slotForm.startTime}
+                      onChange={e => setSlotForm(f => ({ ...f, startTime: e.target.value }))}
+                      className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+                    <input required type="time" value={slotForm.endTime}
+                      onChange={e => setSlotForm(f => ({ ...f, endTime: e.target.value }))}
+                      className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-500 whitespace-nowrap">מקומות פנויים:</label>
+                    <input type="number" min="1" max="50" value={slotForm.positions}
+                      onChange={e => setSlotForm(f => ({ ...f, positions: e.target.value }))}
+                      className="w-20 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+                  </div>
+                  {slotFormError && <p className="text-red-500 text-xs">{slotFormError}</p>}
+                  <div className="flex gap-2 pt-1">
+                    <button type="submit" disabled={slotSaving}
+                      className="flex-1 bg-violet-600 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40">
+                      {slotSaving ? 'שומר...' : 'צור סלוט'}
+                    </button>
+                    <button type="button" onClick={() => setShowSlotForm(false)}
+                      className="flex-1 bg-gray-100 text-gray-600 rounded-xl py-2.5 text-sm">ביטול</button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Slots list */}
+            {slotsLoading ? <Spinner /> : slots.length === 0 ? (
+              <EmptyState icon="🎯" text="אין משמרות פתוחות לבקשה" />
+            ) : (
+              <div className="space-y-2">
+                {slots.map(sl => (
+                  <div key={sl.id} className="bg-white rounded-2xl shadow-sm px-4 py-3 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-violet-600" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-800 text-sm">{sl.title}</p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(sl.date + 'T00:00:00').toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' })}
+                        {sl.workSite ? ` · ${sl.workSite}` : ''}
+                        {` · ${sl.positions} מקומות`}
+                      </p>
+                    </div>
+                    <p className="font-mono text-indigo-600 text-sm font-bold shrink-0" dir="ltr">{sl.startTime}–{sl.endTime}</p>
+                    <button onClick={() => handleDeleteSlot(sl.id)}
+                      className="text-gray-300 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 shrink-0">
+                      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Pending Requests section */}
+          <div>
+            <h3 className="font-semibold text-gray-700 text-sm mb-3">
+              בקשות ממתינות {requests.length > 0 && (
+                <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full mr-1">{requests.length}</span>
+              )}
+            </h3>
+
+            {requestsLoading ? <Spinner /> : requests.length === 0 ? (
+              <EmptyState icon="✉️" text="אין בקשות ממתינות" />
+            ) : (
+              <div className="space-y-2">
+                {requests.map(req => {
+                  const busy = reviewingId === req.id;
+                  return (
+                    <div key={req.id} className="bg-white rounded-2xl shadow-sm px-4 py-3">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Avatar name={req.employeeName} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-800 text-sm">{req.employeeName}</p>
+                          <p className="text-xs text-gray-400 truncate">{req.slotTitle} · {new Date(req.slotDate + 'T00:00:00').toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' })}</p>
+                        </div>
+                        <p className="font-mono text-indigo-600 text-xs font-bold shrink-0" dir="ltr">{req.slotStartTime}–{req.slotEndTime}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleApprove(req.id)}
+                          disabled={busy}
+                          className="flex-1 bg-emerald-500 text-white rounded-xl py-2 text-xs font-semibold disabled:opacity-40"
+                        >
+                          {busy ? '...' : '✓ אשר ויצור משמרת'}
+                        </button>
+                        <button
+                          onClick={() => handleReject(req.id)}
+                          disabled={busy}
+                          className="flex-1 bg-red-50 text-red-600 rounded-xl py-2 text-xs font-semibold disabled:opacity-40"
+                        >
+                          ✗ דחה
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
