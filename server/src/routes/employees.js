@@ -32,11 +32,14 @@ function validateIsraeliPhone(phone) {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// GET all employees (manager only)
+// GET all employees (manager only) — active employees only
+// Filter in JS to avoid requiring a Firestore composite index on (active + name)
 router.get('/', verifyToken, requireManager, async (req, res) => {
   try {
     const snap = await db.collection('employees').orderBy('name').get();
-    const employees = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const employees = snap.docs
+      .filter(d => d.data().active !== false)
+      .map(d => ({ id: d.id, ...d.data() }));
     res.json(employees);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -44,6 +47,8 @@ router.get('/', verifyToken, requireManager, async (req, res) => {
 });
 
 // POST create employee
+// location and allowedRadius are optional — employees without a location
+// can clock in from anywhere (locationRestricted defaults to false when no location given)
 router.post('/', verifyToken, requireManager, async (req, res) => {
   try {
     const data = { ...req.body, active: true, createdAt: new Date() };
@@ -51,6 +56,16 @@ router.post('/', verifyToken, requireManager, async (req, res) => {
       const phoneError = validateIsraeliPhone(data.phone);
       if (phoneError) return res.status(400).json({ error: phoneError });
       data.phone = normalizePhone(data.phone);
+    }
+    // If no location was supplied, mark as unrestricted
+    if (!data.location?.lat && !data.location?.lng) {
+      data.locationRestricted = false;
+      delete data.location;
+      delete data.allowedRadius;
+    } else {
+      // Location provided — enable restriction unless caller set it explicitly
+      if (data.locationRestricted === undefined) data.locationRestricted = true;
+      data.allowedRadius = data.allowedRadius || 200;
     }
     const ref = await db.collection('employees').add(data);
     res.json({ id: ref.id, ...data });

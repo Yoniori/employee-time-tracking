@@ -77,17 +77,24 @@ router.post('/clock-in', verifyToken, async (req, res) => {
       process.env.BYPASS_GEOFENCE === 'true';
 
     if (!bypassGeofence) {
-      if (emp.location?.lat == null || emp.location?.lng == null) {
-        return res.status(400).json({ error: 'לא הוגדר מיקום לאתר העבודה - פנה למנהל' });
-      }
-      const allowed = emp.allowedRadius || 200;
-      const distance = haversineDistance(lat, lng, emp.location.lat, emp.location.lng);
-      if (distance > allowed) {
-        return res.status(403).json({
-          error: `אינך נמצא במיקום העבודה (${Math.round(distance)} מ' מהאתר, מותר עד ${allowed} מ')`,
-          distance: Math.round(distance),
-          allowed,
-        });
+      // Geofence is applied only when the employee has BOTH a defined location
+      // AND locationRestricted is not explicitly false.
+      // - locationRestricted === undefined (existing employees): treated as true → geofence on
+      // - locationRestricted === false (new employees without location, or manager-disabled): skip
+      // - No location coordinates set: skip regardless (employee can clock in from anywhere)
+      const hasLocation = emp.location?.lat != null && emp.location?.lng != null;
+      const isRestricted = emp.locationRestricted !== false;
+
+      if (hasLocation && isRestricted) {
+        const allowed = emp.allowedRadius || 200;
+        const distance = haversineDistance(lat, lng, emp.location.lat, emp.location.lng);
+        if (distance > allowed) {
+          return res.status(403).json({
+            error: `אינך נמצא במיקום העבודה (${Math.round(distance)} מ' מהאתר, מותר עד ${allowed} מ')`,
+            distance: Math.round(distance),
+            allowed,
+          });
+        }
       }
     }
 

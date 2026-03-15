@@ -426,6 +426,14 @@ function EmployeesTab() {
   const [uploadResult, setUploadResult] = useState(null);
   const [search, setSearch] = useState('');
 
+  // Location edit panel state (one panel open at a time, keyed by employee id)
+  const [editingLocationId, setEditingLocationId] = useState(null);
+  const [locForm, setLocForm] = useState({ address: '', allowedRadius: 200, locationRestricted: true });
+  const [locGeocodeResult, setLocGeocodeResult] = useState(null);
+  const [locGeocoding, setLocGeocoding] = useState(false);
+  const [locSaving, setLocSaving] = useState(false);
+  const [locError, setLocError] = useState('');
+
   useEffect(() => { loadEmployees(); }, []);
 
   async function loadEmployees() {
@@ -447,20 +455,75 @@ function EmployeesTab() {
     } finally { setGeocoding(false); }
   }
 
+  async function geocodeLocAddress(address) {
+    setLocGeocoding(true); setLocGeocodeResult(null); setLocError('');
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`, { headers: { 'Accept-Language': 'he' } });
+      const data = await res.json();
+      if (!data.length) throw new Error('הכתובת לא נמצאה');
+      const { lat, lon, display_name } = data[0];
+      const result = { lat: parseFloat(lat), lng: parseFloat(lon), display_name };
+      setLocGeocodeResult(result);
+      return result;
+    } catch (err) { setLocError(err.message); return null; }
+    finally { setLocGeocoding(false); }
+  }
+
+  // Create: address is now optional. If provided, geocode and enable restriction.
   async function handleCreate(e) {
     e.preventDefault(); setFormError('');
     if (!/^\d{9}$/.test(form.idNumber)) { setFormError('תעודת זהות חייבת להיות 9 ספרות'); return; }
     try {
-      const geo = geocodeResult || await geocodeAddress(form.address);
-      await api.createEmployee({ ...form, location: { lat: geo.lat, lng: geo.lng }, allowedRadius: 200, active: true });
+      const payload = { name: form.name, idNumber: form.idNumber, phone: form.phone, workSite: form.workSite };
+      if (form.address.trim()) {
+        const geo = geocodeResult || await geocodeAddress(form.address);
+        payload.location = { lat: geo.lat, lng: geo.lng };
+        payload.allowedRadius = 200;
+        payload.locationRestricted = true;
+      }
+      // No address → backend sets locationRestricted: false automatically
+      await api.createEmployee(payload);
       setForm({ name: '', idNumber: '', phone: '', workSite: '', address: '' });
       setGeocodeResult(null); setShowForm(false); loadEmployees();
     } catch (err) { setFormError(err.message); }
   }
 
+  function openLocationPanel(emp) {
+    setEditingLocationId(emp.id);
+    setLocGeocodeResult(null); setLocError('');
+    setLocForm({
+      address: '',
+      allowedRadius: emp.allowedRadius || 200,
+      locationRestricted: emp.locationRestricted !== false,
+    });
+  }
+
+  async function handleSaveLocation(empId) {
+    setLocSaving(true); setLocError('');
+    try {
+      const update = {
+        locationRestricted: locForm.locationRestricted,
+        allowedRadius: Number(locForm.allowedRadius) || 200,
+      };
+      if (locForm.locationRestricted) {
+        const geo = locGeocodeResult || (locForm.address.trim() ? await geocodeLocAddress(locForm.address) : null);
+        if (!geo) { setLocError('יש לאמת כתובת כדי להפעיל הגבלת מיקום'); setLocSaving(false); return; }
+        update.location = { lat: geo.lat, lng: geo.lng };
+      } else {
+        // Disabling restriction — clear location coords
+        update.location = null;
+      }
+      await api.updateEmployee(empId, update);
+      setEditingLocationId(null);
+      loadEmployees();
+    } catch (err) { setLocError(err.message); }
+    finally { setLocSaving(false); }
+  }
+
   async function handleDeactivate(id) {
     if (!confirm('האם להסיר עובד זה?')) return;
-    await api.deleteEmployee(id); loadEmployees();
+    try { await api.deleteEmployee(id); loadEmployees(); }
+    catch (err) { alert('שגיאה: ' + err.message); }
   }
 
   async function handleCSVUpload(e) {
@@ -494,26 +557,32 @@ function EmployeesTab() {
           <h3 className="font-semibold text-gray-700 mb-3">הוספת עובד חדש</h3>
           <form onSubmit={handleCreate} className="space-y-2.5">
             {[
-              { key: 'name', placeholder: 'שם מלא', type: 'text' },
-              { key: 'idNumber', placeholder: 'תעודת זהות (9 ספרות)', type: 'text', maxLength: 9 },
-              { key: 'phone', placeholder: '0501234567', type: 'tel' },
-              { key: 'workSite', placeholder: 'אתר עבודה', type: 'text' },
+              { key: 'name', placeholder: 'שם מלא', type: 'text', req: true },
+              { key: 'idNumber', placeholder: 'תעודת זהות (9 ספרות)', type: 'text', maxLength: 9, req: true },
+              { key: 'phone', placeholder: '0501234567', type: 'tel', req: true },
+              { key: 'workSite', placeholder: 'אתר עבודה', type: 'text', req: false },
             ].map(f => (
               <input key={f.key} type={f.type} maxLength={f.maxLength}
-                value={form[f.key]} placeholder={f.placeholder} required
+                value={form[f.key]} placeholder={f.placeholder} required={f.req}
                 onChange={e => setForm(p => ({ ...p, [f.key]: f.key === 'idNumber' ? e.target.value.replace(/\D/g, '') : e.target.value }))}
                 className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200" />
             ))}
+            {/* Address is optional — if omitted the employee starts with no location restriction */}
             <div className="flex gap-2">
               <input value={form.address}
                 onChange={e => { setForm(p => ({ ...p, address: e.target.value })); setGeocodeResult(null); }}
-                placeholder="כתובת מיקום העבודה" required
+                placeholder="כתובת מיקום עבודה (אופציונלי)"
                 className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200" />
               <button type="button" onClick={() => geocodeAddress(form.address)} disabled={geocoding || !form.address}
                 className="bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl px-3 text-sm disabled:opacity-40 whitespace-nowrap">
                 {geocoding ? '...' : '📍 אמת'}
               </button>
             </div>
+            {!form.address && (
+              <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2">
+                ללא כתובת — העובד יוכל לדווח נוכחות מכל מיקום. ניתן להגדיר מיקום לאחר מכן.
+              </p>
+            )}
             {geocodeResult && (
               <p className="text-xs text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2">
                 ✓ {geocodeResult.display_name}<br />
@@ -550,22 +619,131 @@ function EmployeesTab() {
       {loading && <Spinner />}
 
       <div className="space-y-2">
-        {filtered.map(emp => (
-          <div key={emp.id} className="bg-white rounded-2xl shadow-sm p-4 flex items-center gap-3">
-            <Avatar name={emp.name} />
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-800 text-sm">{emp.name}</p>
-              <p className="text-xs text-gray-400 truncate">{emp.idNumber} · {emp.workSite}</p>
-              <p className="text-xs text-gray-400" dir="ltr">{emp.phone}</p>
+        {filtered.map(emp => {
+          const hasLocation = emp.location?.lat != null;
+          const isRestricted = emp.locationRestricted !== false;
+          const locationActive = hasLocation && isRestricted;
+          const isEditingLoc = editingLocationId === emp.id;
+
+          return (
+            <div key={emp.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+              {/* Main row */}
+              <div className="p-4 flex items-center gap-3">
+                <Avatar name={emp.name} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-800 text-sm">{emp.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{emp.idNumber}{emp.workSite ? ` · ${emp.workSite}` : ''}</p>
+                  <p className="text-xs text-gray-400" dir="ltr">{emp.phone}</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {/* Location status badge + edit button */}
+                  <button
+                    onClick={() => isEditingLoc ? setEditingLocationId(null) : openLocationPanel(emp)}
+                    title="הגדרת מיקום"
+                    className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-xl transition-colors ${
+                      locationActive
+                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                        : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                    }`}
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                    </svg>
+                    {locationActive ? 'מוגבל' : 'חופשי'}
+                  </button>
+                  {/* Delete */}
+                  <button onClick={() => handleDeactivate(emp.id)}
+                    className="text-gray-300 hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-50">
+                    <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Inline location edit panel */}
+              {isEditingLoc && (
+                <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2.5">
+                  <p className="text-xs font-semibold text-gray-600">הגדרת מיקום עבודה</p>
+
+                  {/* Restriction toggle */}
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <div
+                      onClick={() => { setLocForm(f => ({ ...f, locationRestricted: !f.locationRestricted })); setLocGeocodeResult(null); }}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${locForm.locationRestricted ? 'bg-indigo-500' : 'bg-gray-300'}`}
+                    >
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${locForm.locationRestricted ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </div>
+                    <span className="text-sm text-gray-700 font-medium">
+                      {locForm.locationRestricted ? 'הגבלת מיקום פעילה' : 'אין הגבלת מיקום'}
+                    </span>
+                  </label>
+
+                  {locForm.locationRestricted && (
+                    <>
+                      {/* Current location display */}
+                      {hasLocation && !locGeocodeResult && (
+                        <p className="text-xs text-gray-400 bg-white rounded-xl px-3 py-2 border border-gray-100">
+                          מיקום נוכחי: ({emp.location.lat.toFixed(5)}, {emp.location.lng.toFixed(5)}) · רדיוס: {emp.allowedRadius || 200}מ'
+                        </p>
+                      )}
+                      {/* Address input */}
+                      <div className="flex gap-2">
+                        <input
+                          value={locForm.address}
+                          onChange={e => { setLocForm(f => ({ ...f, address: e.target.value })); setLocGeocodeResult(null); }}
+                          placeholder="כתובת חדשה (אופציונלי)"
+                          className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        />
+                        <button type="button"
+                          onClick={() => geocodeLocAddress(locForm.address)}
+                          disabled={locGeocoding || !locForm.address}
+                          className="bg-white border border-gray-200 hover:bg-gray-100 text-gray-700 rounded-xl px-3 text-sm disabled:opacity-40 whitespace-nowrap"
+                        >
+                          {locGeocoding ? '...' : '📍 אמת'}
+                        </button>
+                      </div>
+                      {locGeocodeResult && (
+                        <p className="text-xs text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2">
+                          ✓ {locGeocodeResult.display_name}<br />
+                          <span className="text-gray-400">({locGeocodeResult.lat.toFixed(5)}, {locGeocodeResult.lng.toFixed(5)})</span>
+                        </p>
+                      )}
+                      {/* Radius */}
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-500 whitespace-nowrap">רדיוס מותר (מ'):</label>
+                        <input
+                          type="number" min="10" max="5000" step="10"
+                          value={locForm.allowedRadius}
+                          onChange={e => setLocForm(f => ({ ...f, allowedRadius: e.target.value }))}
+                          className="w-24 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {locError && <p className="text-red-500 text-xs bg-red-50 rounded-xl px-3 py-2">{locError}</p>}
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => handleSaveLocation(emp.id)}
+                      disabled={locSaving}
+                      className="flex-1 bg-indigo-600 text-white rounded-xl py-2 text-sm font-semibold disabled:opacity-40"
+                    >
+                      {locSaving ? 'שומר...' : 'שמור'}
+                    </button>
+                    <button
+                      onClick={() => setEditingLocationId(null)}
+                      className="flex-1 bg-white border border-gray-200 text-gray-600 rounded-xl py-2 text-sm"
+                    >
+                      ביטול
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <button onClick={() => handleDeactivate(emp.id)}
-              className="text-gray-300 hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-50">
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-            </button>
-          </div>
-        ))}
+          );
+        })}
         {!loading && filtered.length === 0 && <EmptyState icon="👥" text="לא נמצאו עובדים" />}
       </div>
     </div>
