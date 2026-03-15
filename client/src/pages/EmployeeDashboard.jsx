@@ -76,6 +76,7 @@ export default function EmployeeDashboard() {
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [openSlots, setOpenSlots] = useState([]);
   const [openSlotsLoading, setOpenSlotsLoading] = useState(false);
+  const [openSlotsError, setOpenSlotsError] = useState('');
   const [requestingSlotId, setRequestingSlotId] = useState(null);
 
   useEffect(() => {
@@ -141,11 +142,14 @@ export default function EmployeeDashboard() {
 
   async function loadOpenSlots() {
     setOpenSlotsLoading(true);
+    setOpenSlotsError('');
     try {
+      // Backend queries shiftSlots where date >= today (Israel tz), so all
+      // upcoming open slots are returned — not filtered to today only.
       const data = await api.getOpenSlots();
       setOpenSlots(data);
-    } catch {
-      // non-critical — fail silently
+    } catch (err) {
+      setOpenSlotsError(err.message || 'שגיאה בטעינת משמרות פתוחות');
     } finally {
       setOpenSlotsLoading(false);
     }
@@ -509,53 +513,66 @@ export default function EmployeeDashboard() {
           )}
         </div>
 
-        {/* Open shift slots — employee can request to join */}
-        {(openSlotsLoading || openSlots.length > 0) && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-gray-500">משמרות פתוחות לבקשה</h2>
-              {openSlotsLoading && <Spinner className="h-4 w-4 text-violet-400" />}
-            </div>
-
-            {!openSlotsLoading && (
-              <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-50">
-                {openSlots.map(sl => {
-                  const d = new Date(sl.date + 'T00:00:00');
-                  const dayLabel = d.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' });
-                  const isRequesting = requestingSlotId === sl.id;
-                  return (
-                    <div key={sl.id} className="flex items-center gap-3 px-4 py-3">
-                      <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
-                        <svg className="w-4 h-4 text-violet-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="3" y="4" width="18" height="18" rx="2" />
-                          <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
-                        </svg>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{sl.title}</p>
-                        <p className="text-xs text-gray-400">
-                          {dayLabel}{sl.workSite ? ` · ${sl.workSite}` : ''}
-                        </p>
-                        <p className="text-xs font-mono text-indigo-500" dir="ltr">{sl.startTime} – {sl.endTime}</p>
-                      </div>
-                      <button
-                        onClick={() => handleRequestSlot(sl.id)}
-                        disabled={sl.alreadyRequested || isRequesting}
-                        className={`shrink-0 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors ${
-                          sl.alreadyRequested
-                            ? 'bg-emerald-100 text-emerald-600 cursor-default'
-                            : 'bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40'
-                        }`}
-                      >
-                        {isRequesting ? '...' : sl.alreadyRequested ? 'נשלחה ✓' : 'בקשה'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+        {/* Open shift slots — always visible; backend returns all future slots (date >= today) */}
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500">משמרות פתוחות לבקשה</h2>
+            {openSlotsLoading && <Spinner className="h-4 w-4 text-violet-400" />}
           </div>
-        )}
+
+          {/* Error state */}
+          {!openSlotsLoading && openSlotsError && (
+            <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3">
+              <p className="text-red-600 text-xs">{openSlotsError}</p>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!openSlotsLoading && !openSlotsError && openSlots.length === 0 && (
+            <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
+              <p className="text-gray-400 text-sm">אין משמרות פתוחות לבקשה כרגע</p>
+            </div>
+          )}
+
+          {/* Slots list — shown for all future slots regardless of whether today has a shift */}
+          {!openSlotsLoading && !openSlotsError && openSlots.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden divide-y divide-gray-50">
+              {openSlots.map(sl => {
+                const d = new Date(sl.date + 'T00:00:00');
+                const dayLabel = d.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' });
+                const isRequesting = requestingSlotId === sl.id;
+                return (
+                  <div key={sl.id} className="flex items-center gap-3 px-4 py-3">
+                    <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-violet-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="4" width="18" height="18" rx="2" />
+                        <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{sl.title}</p>
+                      <p className="text-xs text-gray-400">
+                        {dayLabel}{sl.workSite ? ` · ${sl.workSite}` : ''}
+                      </p>
+                      <p className="text-xs font-mono text-indigo-500" dir="ltr">{sl.startTime} – {sl.endTime}</p>
+                    </div>
+                    <button
+                      onClick={() => handleRequestSlot(sl.id)}
+                      disabled={sl.alreadyRequested || isRequesting}
+                      className={`shrink-0 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors ${
+                        sl.alreadyRequested
+                          ? 'bg-emerald-100 text-emerald-600 cursor-default'
+                          : 'bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40'
+                      }`}
+                    >
+                      {isRequesting ? '...' : sl.alreadyRequested ? 'נשלחה ✓' : 'בקשה'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Recent records history */}
         <div className="mt-6">
