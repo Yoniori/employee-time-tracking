@@ -142,22 +142,35 @@ router.post('/clock-in', verifyToken, async (req, res) => {
 });
 
 // POST clock-out
+// Derives the employee from the JWT phone_number rather than trusting the
+// client-supplied employeeId.  This prevents 403s caused by stale sessionStorage
+// after deactivation/reactivation cycles where the stored doc ID no longer
+// matches the authenticated phone.
 router.post('/clock-out', verifyToken, async (req, res) => {
-  const { employeeId, lat, lng } = req.body;
-  try {
-    const empDoc = await db.collection('employees').doc(employeeId).get();
-    if (!empDoc.exists) return res.status(404).json({ error: 'עובד לא נמצא' });
-    const emp = empDoc.data();
+  const { lat, lng } = req.body;
+  const phone = req.user.phone_number;
+  if (!phone) return res.status(400).json({ error: 'מספר טלפון לא זמין' });
 
-    // Ownership check — same format-agnostic comparison as clock-in
-    if (normalizePhone(req.user.phone_number) !== normalizePhone(emp.phone)) {
-      return res.status(403).json({ error: 'אין הרשאה לבצע פעולה זו' });
-    }
+  try {
+    // Look up employee by JWT phone — the ground truth of who is authenticated.
+    // Build both E.164 and local "0..." variants so the query works regardless of
+    // how the phone was stored in Firestore.
+    const e164 = normalizePhone(phone);
+    const local = '0' + e164.replace(/^\+972/, '');
+    const variants = e164 === local ? [e164] : [e164, local];
+
+    const empSnap = await db.collection('employees')
+      .where('phone', 'in', variants)
+      .limit(1)
+      .get();
+    if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
+    const employeeId = empSnap.docs[0].id;
 
     const snap = await db.collection('timeRecords')
       .where('employeeId', '==', employeeId)
       .where('clockOut', '==', null)
-      .limit(1).get();
+      .limit(1)
+      .get();
     if (snap.empty) return res.status(404).json({ error: 'לא נמצאה כניסה פעילה' });
 
     const doc = snap.docs[0];
@@ -174,7 +187,7 @@ router.post('/clock-out', verifyToken, async (req, res) => {
 
     res.json({ recordId: doc.id, clockOut: now, totalHours });
   } catch (err) {
-    console.error(err);
+    console.error('[POST /clock-out]', err);
     res.status(500).json({ error: err.message });
   }
 });
