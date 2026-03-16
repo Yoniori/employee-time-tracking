@@ -6,6 +6,8 @@ import EmployeeSignup from './pages/EmployeeSignup';
 import ManagerLogin from './pages/ManagerLogin';
 import ManagerDashboard from './pages/ManagerDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
+import { useInactivityLogout } from './hooks/useInactivityLogout';
+import InactivityWarning from './components/InactivityWarning';
 
 function EmployeeRoute({ children }) {
   const { user } = useAuth();
@@ -19,6 +21,23 @@ function ManagerRoute({ children }) {
   if (user === undefined) return <LoadingScreen />;
   if (!user) return <Navigate to="/manager/login" replace />;
   return children;
+}
+
+// Sits as a sibling of <Routes> so its state survives route navigation.
+// After signOut the route guard redirects to the login page; this component
+// renders the "session expired" overlay on top of that page.
+// It never modifies attendance records.
+function InactivityGuard() {
+  const { showWarning, sessionExpired, dismissWarning, dismissExpired } =
+    useInactivityLogout();
+  return (
+    <InactivityWarning
+      showWarning={showWarning}
+      sessionExpired={sessionExpired}
+      onDismissWarning={dismissWarning}
+      onDismissExpired={dismissExpired}
+    />
+  );
 }
 
 function LoadingScreen() {
@@ -36,6 +55,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <InactivityGuard />
         <Routes>
           <Route path="/" element={<EmployeeLogin />} />
           <Route path="/signup" element={<EmployeeSignup />} />
