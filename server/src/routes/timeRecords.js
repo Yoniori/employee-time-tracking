@@ -288,6 +288,7 @@ router.get('/live', verifyToken, requireManager, async (req, res) => {
   try {
     const snap = await db.collection('timeRecords')
       .where('clockOut', '==', null)
+      .limit(200)
       .get();
     const records = snap.docs.map(d => {
       const data = d.data();

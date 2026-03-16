@@ -4,14 +4,22 @@ const cors = require('cors');
 const { rateLimit } = require('express-rate-limit');
 
 const app = express();
+// Ensure NODE_ENV is always set — default to 'production' to fail closed on security checks
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = 'production';
+  console.warn('[startup] NODE_ENV was not set — defaulting to "production"');
+}
+console.log(`[startup] NODE_ENV=${process.env.NODE_ENV}, PORT=${process.env.PORT || 3001}`);
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:4173',
-  'https://employee-time-tracking-tau.vercel.app',
-  ...(process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : []),
+  // Use env var in production; fall back to hardcoded domain if not set
+  ...(process.env.CORS_ORIGIN
+    ? [process.env.CORS_ORIGIN]
+    : ['https://employee-time-tracking-tau.vercel.app']),
 ];
 app.use(cors({ origin: ALLOWED_ORIGINS }));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 // Rate limit: employee ID lookup — prevents enumeration attacks
 const lookupLimiter = rateLimit({
@@ -22,6 +30,7 @@ const lookupLimiter = rateLimit({
   message: { error: 'יותר מדי ניסיונות - נסה שוב בעוד דקה' },
 });
 app.use('/api/auth/lookup-employee', lookupLimiter);
+app.use('/api/signup', lookupLimiter);
 
 // Routes
 app.use('/api/employees', require('./routes/employees'));

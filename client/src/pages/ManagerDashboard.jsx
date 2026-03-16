@@ -1859,7 +1859,7 @@ function ShiftsTab() {
                                     <Avatar name={r.employeeName} size="sm" />
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-medium text-gray-800 truncate">{r.employeeName}</p>
-                                      {r.employeeId && <p className="text-xs text-gray-400">ת.ז. {r.employeeId}</p>}
+                                      {r.idNumber && <p className="text-xs text-gray-400">ת.ז. {r.idNumber}</p>}
                                     </div>
                                     {r.createdAt && (
                                       <p className="text-xs text-gray-400 shrink-0">
@@ -1888,7 +1888,7 @@ function ShiftsTab() {
                                         <Avatar name={r.employeeName} size="sm" />
                                         <div className="flex-1 min-w-0">
                                           <p className="text-sm font-medium text-gray-800 truncate">{r.employeeName}</p>
-                                          {r.employeeId && <p className="text-xs text-gray-400">ת.ז. {r.employeeId}</p>}
+                                          {r.idNumber && <p className="text-xs text-gray-400">ת.ז. {r.idNumber}</p>}
                                         </div>
                                         {r.createdAt && (
                                           <p className="text-xs text-gray-400 shrink-0">
@@ -1932,7 +1932,7 @@ function ShiftsTab() {
                                     <Avatar name={r.employeeName} size="sm" />
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-medium text-gray-500 truncate">{r.employeeName}</p>
-                                      {r.employeeId && <p className="text-xs text-gray-400">ת.ז. {r.employeeId}</p>}
+                                      {r.idNumber && <p className="text-xs text-gray-400">ת.ז. {r.idNumber}</p>}
                                     </div>
                                     {r.createdAt && (
                                       <p className="text-xs text-gray-400 shrink-0">

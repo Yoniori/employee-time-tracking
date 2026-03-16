@@ -229,7 +229,8 @@ router.post('/open-slots/:slotId/request', verifyToken, async (req, res) => {
     const empSnap = await db.collection('employees').where('phone', 'in', phoneVariants(phone)).limit(1).get();
     if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
     const employeeId = empSnap.docs[0].id;
-    const employeeName = empSnap.docs[0].data().name;
+    const emp = empSnap.docs[0].data();
+    const employeeName = emp.name;
 
     const slotDoc = await db.collection('shiftSlots').doc(req.params.slotId).get();
     if (!slotDoc.exists) return res.status(404).json({ error: 'הסלוט לא נמצא' });
@@ -253,6 +254,7 @@ router.post('/open-slots/:slotId/request', verifyToken, async (req, res) => {
       slotWorkSite:  slot.workSite || '',
       employeeId,
       employeeName,
+      idNumber:      emp.idNumber || '',
       status:        'pending',
       createdAt:     new Date(),
     });
@@ -293,6 +295,29 @@ router.post('/requests/:id/approve', verifyToken, requireManager, async (req, re
     if (!reqDoc.exists) return res.status(404).json({ error: 'בקשה לא נמצאה' });
     const r = reqDoc.data();
     if (r.status !== 'pending') return res.status(409).json({ error: 'בקשה זו כבר טופלה' });
+
+    // Guard: prevent duplicate shift for same employee on same date
+    const dupShift = await db.collection('shifts')
+      .where('employeeId', '==', r.employeeId)
+      .where('date',       '==', r.slotDate)
+      .limit(1)
+      .get();
+    if (!dupShift.empty) {
+      return res.status(409).json({ error: 'לעובד זה כבר קיימת משמרת בתאריך זה' });
+    }
+
+    // Guard: don't exceed the slot's positions limit
+    const slotDoc = await db.collection('shiftSlots').doc(r.slotId).get();
+    if (slotDoc.exists) {
+      const positions = Number(slotDoc.data().positions) || 1;
+      const filledSnap = await db.collection('shifts')
+        .where('fromSlotId', '==', r.slotId)
+        .limit(positions + 1)
+        .get();
+      if (filledSnap.size >= positions) {
+        return res.status(409).json({ error: `הסלוט מלא — ${positions} מקומות כבר אושרו` });
+      }
+    }
 
     const batch = db.batch();
     batch.update(reqDoc.ref, { status: 'approved', reviewedAt: new Date() });
