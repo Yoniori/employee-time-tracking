@@ -2,15 +2,15 @@ import { auth } from './firebase';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
-async function getToken() {
+async function getToken(forceRefresh = false) {
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
-  return user.getIdToken();
+  return user.getIdToken(forceRefresh);
 }
 
 async function request(path, options = {}) {
   const token = await getToken();
-  const res = await fetch(BASE + path, {
+  const fetchOpts = {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -18,7 +18,18 @@ async function request(path, options = {}) {
       ...options.headers,
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  };
+  let res = await fetch(BASE + path, fetchOpts);
+
+  // 403 can happen when the cached Firebase token pre-dates a custom-claim update
+  // (e.g. role:'manager' set after the manager's session was established).
+  // Force-refresh the token once and retry — self-heals without requiring re-login.
+  if (res.status === 403) {
+    const freshToken = await getToken(true);
+    fetchOpts.headers = { ...fetchOpts.headers, Authorization: `Bearer ${freshToken}` };
+    res = await fetch(BASE + path, fetchOpts);
+  }
+
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'שגיאת שרת');
   return data;
