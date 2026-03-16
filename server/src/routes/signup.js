@@ -64,13 +64,16 @@ router.post('/', async (req, res) => {
       return res.status(409).json({ error: 'קיים כבר עובד פעיל במערכת עם תעודת זהות זו' });
     }
 
-    // 2. Employee with same phone (any status — avoids OTP confusion)?
+    // 2. ACTIVE employee with same phone?
+    // Inactive employees (active === false) do not block re-registration —
+    // the approval flow will reactivate the existing record instead.
     const empByPhoneSnap = await db.collection('employees')
       .where('phone', 'in', phoneVariants(normalizedPhone))
       .limit(5)
       .get();
-    if (!empByPhoneSnap.empty) {
-      return res.status(409).json({ error: 'קיים כבר עובד במערכת עם מספר טלפון זה' });
+    const activeEmpByPhone = empByPhoneSnap.docs.find(d => d.data().active !== false);
+    if (activeEmpByPhone) {
+      return res.status(409).json({ error: 'קיים כבר עובד פעיל במערכת עם מספר טלפון זה' });
     }
 
     // 3. Pending signup request with same ID number?
@@ -154,29 +157,50 @@ router.post('/requests/:id/approve', verifyToken, requireManager, async (req, re
       .where('phone', 'in', phoneVariants(r.phone))
       .limit(5)
       .get();
-    if (!empByPhoneSnap.empty) {
-      return res.status(409).json({ error: 'כבר קיים עובד עם מספר טלפון זה — לא ניתן לאשר' });
+    // Only active employees block approval — inactive records will be reactivated below.
+    const activeEmpByPhone = empByPhoneSnap.docs.find(d => d.data().active !== false);
+    if (activeEmpByPhone) {
+      return res.status(409).json({ error: 'כבר קיים עובד פעיל עם מספר טלפון זה — לא ניתן לאשר' });
     }
 
-    // ── Atomic batch: approve request + create employee ───────────────────────
+    // ── Reactivate existing inactive employee, or create a new record ─────────
+    // Prefer reactivation: the old doc ID is already referenced in shifts and
+    // timeRecords for this person, so reusing it restores their full history.
+    const inactiveEmployee =
+      empByIdSnap.docs.find(d => d.data().active === false) ||
+      empByPhoneSnap.docs.find(d => d.data().active === false);
+
     const batch = db.batch();
+    batch.update(reqDoc.ref, { status: 'approved', reviewedAt: new Date() });
 
-    batch.update(reqDoc.ref, {
-      status:     'approved',
-      reviewedAt: new Date(),
-    });
+    let resolvedEmployeeId;
 
-    const empRef = db.collection('employees').doc();
-    batch.set(empRef, {
-      name:               r.fullName,
-      idNumber:           r.idNumber,
-      phone:              r.phone,        // already E.164 from submission
-      workSite:           '',             // no work site during self-registration
-      locationRestricted: false,          // same as manual creation with no address
-      active:             true,
-      createdAt:          new Date(),
-      fromSignupRequest:  req.params.id,  // audit trail
-    });
+    if (inactiveEmployee) {
+      // Reactivation path — update existing record, preserve doc ID and history
+      batch.update(inactiveEmployee.ref, {
+        name:              r.fullName,
+        idNumber:          r.idNumber,
+        phone:             r.phone,
+        active:            true,
+        reactivatedAt:     new Date(),
+        fromSignupRequest: req.params.id,
+      });
+      resolvedEmployeeId = inactiveEmployee.id;
+    } else {
+      // New-record path — no prior employee found at all
+      const empRef = db.collection('employees').doc();
+      batch.set(empRef, {
+        name:               r.fullName,
+        idNumber:           r.idNumber,
+        phone:              r.phone,        // already E.164 from submission
+        workSite:           '',             // no work site during self-registration
+        locationRestricted: false,
+        active:             true,
+        createdAt:          new Date(),
+        fromSignupRequest:  req.params.id,
+      });
+      resolvedEmployeeId = empRef.id;
+    }
 
     await batch.commit();
 
@@ -186,10 +210,15 @@ router.post('/requests/:id/approve', verifyToken, requireManager, async (req, re
       actorEmail: req.user.email || null,
       targetType: 'employeeSignupRequest',
       targetId:   req.params.id,
-      meta:       { fullName: r.fullName, idNumber: r.idNumber, newEmployeeId: empRef.id },
+      meta:       {
+        fullName:            r.fullName,
+        idNumber:            r.idNumber,
+        employeeId:          resolvedEmployeeId,
+        reactivated:         !!inactiveEmployee,
+      },
     });
 
-    res.json({ employeeId: empRef.id });
+    res.json({ employeeId: resolvedEmployeeId });
   } catch (err) {
     console.error('[POST /signup/requests/:id/approve]', err);
     res.status(500).json({ error: err.message });
