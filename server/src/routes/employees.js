@@ -5,6 +5,7 @@ const { parse } = require('csv-parse/sync');
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
+const { writeAuditLog } = require('../utils/auditLog');
 
 // Normalise any Israeli phone number to E.164 (+972...).
 // All employee records are stored in this format so that the Firebase phone_number
@@ -45,6 +46,7 @@ router.get('/', verifyToken, requireManager, async (req, res) => {
       .map(d => ({ id: d.id, ...d.data() }));
     res.json(employees);
   } catch (err) {
+    console.error('[GET /employees]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -73,6 +75,7 @@ router.post('/', verifyToken, requireManager, async (req, res) => {
     const ref = await db.collection('employees').add(data);
     res.json({ id: ref.id, ...data });
   } catch (err) {
+    console.error('[POST /employees]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -87,8 +90,27 @@ router.put('/:id', verifyToken, requireManager, async (req, res) => {
       data.phone = normalizePhone(data.phone);
     }
     await db.collection('employees').doc(req.params.id).update(data);
+
+    // Log when location restriction settings are changed
+    const locationFields = ['locationRestricted', 'location', 'allowedRadius'];
+    if (locationFields.some(f => f in data)) {
+      writeAuditLog({
+        action:     'employee_location_restriction_changed',
+        actorUid:   req.user.uid,
+        actorEmail: req.user.email || null,
+        targetType: 'employee',
+        targetId:   req.params.id,
+        meta: {
+          locationRestricted: data.locationRestricted,
+          allowedRadius:      data.allowedRadius,
+          hasLocation:        !!(data.location?.lat || data.location?.lng),
+        },
+      });
+    }
+
     res.json({ success: true });
   } catch (err) {
+    console.error('[PUT /employees/:id]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -96,9 +118,24 @@ router.put('/:id', verifyToken, requireManager, async (req, res) => {
 // DELETE (deactivate) employee
 router.delete('/:id', verifyToken, requireManager, async (req, res) => {
   try {
+    const empDoc = await db.collection('employees').doc(req.params.id).get();
     await db.collection('employees').doc(req.params.id).update({ active: false });
+
+    writeAuditLog({
+      action:     'employee_deactivated',
+      actorUid:   req.user.uid,
+      actorEmail: req.user.email || null,
+      targetType: 'employee',
+      targetId:   req.params.id,
+      meta:       {
+        name:     empDoc.exists ? empDoc.data().name     : null,
+        idNumber: empDoc.exists ? empDoc.data().idNumber : null,
+      },
+    });
+
     res.json({ success: true });
   } catch (err) {
+    console.error('[DELETE /employees/:id]', err);
     res.status(500).json({ error: err.message });
   }
 });

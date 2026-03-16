@@ -3,6 +3,7 @@ const router = express.Router();
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
+const { writeAuditLog } = require('../utils/auditLog');
 
 // Normalise any Israeli phone number to E.164 (+972...).
 // Firebase always issues phone_number JWT claims in E.164, but employee records
@@ -67,9 +68,19 @@ router.post('/', verifyToken, requireManager, async (req, res) => {
       workSite: workSite || emp.workSite || '',
       createdAt: new Date(),
     });
+
+    writeAuditLog({
+      action:     'shift_created_manual',
+      actorUid:   req.user.uid,
+      actorEmail: req.user.email || null,
+      targetType: 'shift',
+      targetId:   ref.id,
+      meta:       { employeeId, employeeName: emp.name, date, startTime, endTime },
+    });
+
     res.json({ shiftId: ref.id });
   } catch (err) {
-    console.error(err);
+    console.error('[POST /shifts]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -335,9 +346,25 @@ router.post('/requests/:id/approve', verifyToken, requireManager, async (req, re
     });
 
     await batch.commit();
+
+    writeAuditLog({
+      action:     'slot_request_approved',
+      actorUid:   req.user.uid,
+      actorEmail: req.user.email || null,
+      targetType: 'shiftRequest',
+      targetId:   req.params.id,
+      meta:       {
+        employeeId:   r.employeeId,
+        employeeName: r.employeeName,
+        slotId:       r.slotId,
+        slotDate:     r.slotDate,
+        shiftId:      shiftRef.id,
+      },
+    });
+
     res.json({ shiftId: shiftRef.id });
   } catch (err) {
-    console.error(err);
+    console.error('[POST /shifts/requests/:id/approve]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -348,7 +375,23 @@ router.post('/requests/:id/reject', verifyToken, requireManager, async (req, res
     const reqDoc = await db.collection('shiftRequests').doc(req.params.id).get();
     if (!reqDoc.exists) return res.status(404).json({ error: 'בקשה לא נמצאה' });
     if (reqDoc.data().status !== 'pending') return res.status(409).json({ error: 'בקשה זו כבר טופלה' });
+    const rData = reqDoc.data();
     await reqDoc.ref.update({ status: 'rejected', reviewedAt: new Date() });
+
+    writeAuditLog({
+      action:     'slot_request_rejected',
+      actorUid:   req.user.uid,
+      actorEmail: req.user.email || null,
+      targetType: 'shiftRequest',
+      targetId:   req.params.id,
+      meta:       {
+        employeeId:   rData.employeeId,
+        employeeName: rData.employeeName,
+        slotId:       rData.slotId,
+        slotDate:     rData.slotDate,
+      },
+    });
+
     res.json({ ok: true });
   } catch (err) {
     console.error('[POST /shifts/requests/:id/reject]', err);
@@ -425,9 +468,21 @@ router.post('/import', verifyToken, requireManager, async (req, res) => {
     }
 
     if (imported.length > 0) await batch.commit();
+
+    if (imported.length > 0) {
+      writeAuditLog({
+        action:     'shifts_imported_bulk',
+        actorUid:   req.user.uid,
+        actorEmail: req.user.email || null,
+        targetType: 'shift',
+        targetId:   'bulk',
+        meta:       { importedCount: imported.length, skippedCount: skipped.length },
+      });
+    }
+
     res.json({ imported: imported.length, skipped: skipped.length, skippedDetails: skipped });
   } catch (err) {
-    console.error(err);
+    console.error('[POST /shifts/import]', err);
     res.status(500).json({ error: err.message });
   }
 });

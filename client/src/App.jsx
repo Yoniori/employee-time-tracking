@@ -5,6 +5,7 @@ import EmployeeDashboard from './pages/EmployeeDashboard';
 import EmployeeSignup from './pages/EmployeeSignup';
 import ManagerLogin from './pages/ManagerLogin';
 import ManagerDashboard from './pages/ManagerDashboard';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function EmployeeRoute({ children }) {
   const { user } = useAuth();
@@ -39,11 +40,15 @@ export default function App() {
           <Route path="/" element={<EmployeeLogin />} />
           <Route path="/signup" element={<EmployeeSignup />} />
           <Route path="/dashboard" element={
-            <EmployeeRoute><EmployeeDashboard /></EmployeeRoute>
+            <EmployeeRoute>
+              <ErrorBoundary><EmployeeDashboard /></ErrorBoundary>
+            </EmployeeRoute>
           } />
           <Route path="/manager/login" element={<ManagerLogin />} />
           <Route path="/manager" element={
-            <ManagerRoute><ManagerDashboard /></ManagerRoute>
+            <ManagerRoute>
+              <ErrorBoundary><ManagerDashboard /></ErrorBoundary>
+            </ManagerRoute>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

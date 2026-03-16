@@ -3,6 +3,7 @@ const router = express.Router();
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
+const { writeAuditLog } = require('../utils/auditLog');
 
 // ─── Phone helpers (same logic as employees.js — copied to avoid shared-module risk) ─
 
@@ -178,6 +179,16 @@ router.post('/requests/:id/approve', verifyToken, requireManager, async (req, re
     });
 
     await batch.commit();
+
+    writeAuditLog({
+      action:     'signup_request_approved',
+      actorUid:   req.user.uid,
+      actorEmail: req.user.email || null,
+      targetType: 'employeeSignupRequest',
+      targetId:   req.params.id,
+      meta:       { fullName: r.fullName, idNumber: r.idNumber, newEmployeeId: empRef.id },
+    });
+
     res.json({ employeeId: empRef.id });
   } catch (err) {
     console.error('[POST /signup/requests/:id/approve]', err);
@@ -194,7 +205,18 @@ router.post('/requests/:id/reject', verifyToken, requireManager, async (req, res
     if (reqDoc.data().status !== 'pending') {
       return res.status(409).json({ error: 'בקשה זו כבר טופלה' });
     }
+    const rData = reqDoc.data();
     await reqDoc.ref.update({ status: 'rejected', reviewedAt: new Date() });
+
+    writeAuditLog({
+      action:     'signup_request_rejected',
+      actorUid:   req.user.uid,
+      actorEmail: req.user.email || null,
+      targetType: 'employeeSignupRequest',
+      targetId:   req.params.id,
+      meta:       { fullName: rData.fullName, idNumber: rData.idNumber },
+    });
+
     res.json({ ok: true });
   } catch (err) {
     console.error('[POST /signup/requests/:id/reject]', err);

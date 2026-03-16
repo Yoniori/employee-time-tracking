@@ -10,7 +10,8 @@ async function verifyToken(req, res, next) {
     const decoded = await auth.verifyIdToken(token);
     req.user = decoded;
     next();
-  } catch {
+  } catch (err) {
+    console.error('[verifyToken] Token verification failed:', err.code || err.message);
     res.status(401).json({ error: 'Invalid token' });
   }
 }

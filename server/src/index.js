@@ -40,7 +40,17 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sheets', require('./routes/sheets'));
 app.use('/api/signup', require('./routes/signup'));
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+// Health check — used by Railway uptime monitoring and external ping services.
+// Returns structured status without exposing secrets or internal config.
+app.get('/api/health', (req, res) => {
+  res.json({
+    status:      'ok',
+    uptime:      Math.round(process.uptime()), // seconds the server has been running
+    environment: process.env.NODE_ENV,
+    timestamp:   new Date().toISOString(),
+    version:     '1.0.0',
+  });
+});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
