@@ -245,11 +245,26 @@ router.get('/my', verifyToken, async (req, res) => {
   }
 });
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 // GET all records (manager only) with filters pushed into Firestore
 router.get('/', verifyToken, requireManager, async (req, res) => {
   try {
     let query = db.collection('timeRecords');
     const { employeeId, site, from, to } = req.query;
+
+    if (from && !DATE_RE.test(from)) return res.status(400).json({ error: 'פורמט תאריך "from" לא תקין (YYYY-MM-DD)' });
+    if (to && !DATE_RE.test(to)) return res.status(400).json({ error: 'פורמט תאריך "to" לא תקין (YYYY-MM-DD)' });
+
+    if (from) {
+      const fromDate = new Date(from);
+      if (isNaN(fromDate.getTime())) return res.status(400).json({ error: 'תאריך "from" לא חוקי' });
+      if (to) {
+        const toDate = new Date(to);
+        if (isNaN(toDate.getTime())) return res.status(400).json({ error: 'תאריך "to" לא חוקי' });
+        if ((toDate - fromDate) / 86400000 > 90) return res.status(400).json({ error: 'טווח התאריכים לא יכול לעלות על 90 יום' });
+      }
+    }
 
     if (employeeId) query = query.where('employeeId', '==', employeeId);
     if (site) query = query.where('workSite', '==', site);
