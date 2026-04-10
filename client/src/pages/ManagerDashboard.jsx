@@ -212,7 +212,7 @@ function LiveTab() {
   return (
     <div className="p-4">
       {/* KPI row */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5">
         <KpiCard label="נוכחים עכשיו" value={records.length} accent="emerald" />
         <KpiCard label="שעות מצטברות" value={totalLiveHours.toFixed(1)} sub="היום" accent="indigo" />
         <KpiCard
@@ -250,9 +250,9 @@ function LiveTab() {
                 </div>
                 <p className="text-xs text-gray-400 truncate">{r.workSite}</p>
               </div>
-              <div className="text-left shrink-0">
+              <div className="shrink-0">
                 <p className="font-mono font-bold text-indigo-600 text-lg tabular-nums" dir="ltr">{elapsedLabel(r.clockIn)}</p>
-                <p className="text-xs text-gray-400 text-left" dir="ltr">
+                <p className="text-xs text-gray-400" dir="ltr">
                   {new Date(r.clockIn).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
@@ -349,7 +349,7 @@ function RecordsTab() {
 
       {/* Filters */}
       <div className="bg-white rounded-2xl shadow-sm p-4 mb-4 space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-gray-400 mb-1 block">מתאריך</label>
             <input type="date" value={filters.from}
@@ -363,7 +363,7 @@ function RecordsTab() {
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-gray-400 mb-1 block">עובד</label>
             <select value={filters.employeeId}
@@ -1673,7 +1673,7 @@ function ShiftsTab() {
                         <p className="font-semibold text-gray-800 text-sm truncate">{sh.employeeName}</p>
                         <p className="text-xs text-gray-400 truncate">{sh.workSite}</p>
                       </div>
-                      <div className="shrink-0 text-left">
+                      <div className="shrink-0">
                         <p className="font-mono text-indigo-600 text-sm font-bold" dir="ltr">
                           {sh.startTime} – {sh.endTime}
                         </p>
@@ -1795,7 +1795,7 @@ function ShiftsTab() {
                             {` · ${sl.positions} מקומות`}
                             {/* Show request counts once loaded */}
                             {detail && !detail.loading && (
-                              <span className="mr-1">
+                              <span className="ms-1">
                                 {' · '}
                                 <span className="text-emerald-600 font-medium">{approved.length}✓</span>
                                 {' '}
@@ -1958,7 +1958,7 @@ function ShiftsTab() {
           <div>
             <h3 className="font-semibold text-gray-700 text-sm mb-3">
               בקשות ממתינות {requests.length > 0 && (
-                <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full mr-1">{requests.length}</span>
+                <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full ms-1">{requests.length}</span>
               )}
             </h3>
 

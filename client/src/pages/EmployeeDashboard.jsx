@@ -403,7 +403,7 @@ export default function EmployeeDashboard() {
                 <p className="text-sm font-bold text-gray-800" dir="ltr">
                   {todayShift.startTime} – {todayShift.endTime}
                   {todayShift.workSite && (
-                    <span className="text-xs font-normal text-gray-500 mr-2" dir="rtl">{todayShift.workSite}</span>
+                    <span className="text-xs font-normal text-gray-500 ms-2" dir="rtl">{todayShift.workSite}</span>
                   )}
                 </p>
               ) : (
@@ -613,11 +613,11 @@ export default function EmployeeDashboard() {
                         </p>
                       </div>
                     </div>
-                    <div className="text-left">
+                    <div className="shrink-0 text-end">
                       {rec.totalHours != null ? (
                         <span className="text-sm font-semibold text-gray-700" dir="ltr">
                           {rec.totalHours.toFixed(2)}
-                          <span className="text-xs font-normal text-gray-400 mr-0.5"> שע'</span>
+                          <span className="text-xs font-normal text-gray-400 ms-0.5"> שע'</span>
                         </span>
                       ) : isActive ? (
                         <span className="text-xs font-medium text-emerald-500">פעיל</span>

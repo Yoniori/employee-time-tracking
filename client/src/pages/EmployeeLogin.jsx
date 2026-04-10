@@ -159,7 +159,7 @@ export default function EmployeeLogin() {
     >
       <div id="recaptcha-container" ref={recaptchaRef} />
 
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-sm px-4 sm:px-0">
         {/* Brand */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/20 backdrop-blur mb-4 shadow-lg">
@@ -179,7 +179,7 @@ export default function EmployeeLogin() {
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-3xl shadow-2xl p-7">
+        <div className="bg-white rounded-3xl shadow-2xl p-4 sm:p-7">
 
           {step === 'id' && (
             <>
@@ -219,10 +219,11 @@ export default function EmployeeLogin() {
                 <button
                   type="submit"
                   disabled={loading || idNumber.length !== 9}
-                  className="w-full rounded-2xl py-3.5 font-bold text-base transition-all
-                    disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]
-                    flex items-center justify-center gap-2"
-                  style={{ background: loading || idNumber.length !== 9 ? undefined : 'linear-gradient(135deg, #4f46e5, #6366f1)', backgroundColor: loading || idNumber.length !== 9 ? '#e0e0e0' : undefined, color: loading || idNumber.length !== 9 ? '#999' : 'white' }}
+                  title={idNumber.length !== 9 ? 'יש להזין 9 ספרות של תעודת זהות' : undefined}
+                  className="w-full rounded-2xl py-3.5 font-bold text-base text-white transition-all
+                    disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed
+                    active:scale-[0.98] flex items-center justify-center gap-2"
+                  style={!(loading || idNumber.length !== 9) ? { background: 'linear-gradient(135deg, #4f46e5, #6366f1)' } : undefined}
                 >
                   {loading ? <><Spinner /> מאמת...</> : 'המשך'}
                 </button>

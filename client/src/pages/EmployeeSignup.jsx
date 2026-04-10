@@ -43,7 +43,7 @@ export default function EmployeeSignup() {
       style={{ background: 'linear-gradient(135deg, #3730a3 0%, #4f46e5 50%, #6366f1 100%)' }}
       dir="rtl"
     >
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-sm px-4 sm:px-0">
         {/* Brand */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/20 backdrop-blur mb-4 shadow-lg">
@@ -57,7 +57,7 @@ export default function EmployeeSignup() {
           <p className="text-indigo-200 mt-1 text-sm">בקשה תישלח לאישור מנהל</p>
         </div>
 
-        <div className="bg-white rounded-3xl shadow-2xl p-7">
+        <div className="bg-white rounded-3xl shadow-2xl p-4 sm:p-7">
           {submitted ? (
             /* ── Success state ────────────────────────────────────────────── */
             <div className="text-center py-4">
