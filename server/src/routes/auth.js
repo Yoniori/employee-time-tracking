@@ -1,16 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db, auth } = require('../firebase');
-
-// Normalize any Israeli phone number to E.164 (+972...)
-function normalizePhone(phone) {
-  if (!phone) return phone;
-  const digits = phone.replace(/[\s\-().]/g, '');
-  if (digits.startsWith('+')) return digits;           // already E.164
-  if (digits.startsWith('972')) return '+' + digits;   // 972501234567
-  if (digits.startsWith('0')) return '+972' + digits.slice(1); // 0501234567
-  return '+972' + digits;                              // bare digits
-}
+const { normalizePhone } = require('../utils/phone');
 
 // Lookup employee by ID number, return phone for OTP
 router.post('/lookup-employee', async (req, res) => {

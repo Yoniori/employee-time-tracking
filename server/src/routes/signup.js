@@ -4,33 +4,7 @@ const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
 const { writeAuditLog } = require('../utils/auditLog');
-
-// ─── Phone helpers (same logic as employees.js — copied to avoid shared-module risk) ─
-
-function normalizePhone(phone) {
-  if (!phone) return phone;
-  const digits = String(phone).replace(/[\s\-().]/g, '');
-  if (digits.startsWith('+')) return digits;
-  if (digits.startsWith('972')) return '+' + digits;
-  if (digits.startsWith('0')) return '+972' + digits.slice(1);
-  return '+972' + digits;
-}
-
-function validateIsraeliPhone(phone) {
-  if (!phone) return 'מספר טלפון הוא שדה חובה';
-  const e164 = normalizePhone(phone);
-  if (!/^\+9725\d{8}$/.test(e164)) {
-    return 'מספר טלפון לא תקין — יש להזין מספר נייד ישראלי (לדוגמה: 0501234567)';
-  }
-  return null;
-}
-
-// Build both phone variants (E.164 and local "0...") for Firestore 'in' lookups
-function phoneVariants(rawPhone) {
-  const e164 = normalizePhone(rawPhone);
-  const local = '0' + e164.replace(/^\+972/, '');
-  return e164 === local ? [e164] : [e164, local];
-}
+const { normalizePhone, validateIsraeliPhone, phoneVariants } = require('../utils/phone');
 
 // ─── POST /api/signup ─────────────────────────────────────────────────────────
 // Public — no authentication required.

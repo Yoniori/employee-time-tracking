@@ -4,25 +4,7 @@ const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
 const { writeAuditLog } = require('../utils/auditLog');
-
-// Normalise any Israeli phone number to E.164 (+972...).
-// Firebase always issues phone_number JWT claims in E.164, but employee records
-// may be stored as local "0..." format.  Build both variants and use Firestore
-// 'in' so the lookup works regardless of which format is stored.
-function normalizePhone(phone) {
-  if (!phone) return '';
-  const digits = String(phone).replace(/[\s\-().]/g, '');
-  if (digits.startsWith('+')) return digits;
-  if (digits.startsWith('972')) return '+' + digits;
-  if (digits.startsWith('0')) return '+972' + digits.slice(1);
-  return '+972' + digits;
-}
-
-function phoneVariants(rawPhone) {
-  const e164 = normalizePhone(rawPhone);
-  const local = '0' + e164.replace(/^\+972/, '');
-  return e164 === local ? [e164] : [e164, local];
-}
+const { normalizePhone, phoneVariants } = require('../utils/phone');
 
 // Returns today's date as "YYYY-MM-DD" in Israel time
 function todayInIsrael() {

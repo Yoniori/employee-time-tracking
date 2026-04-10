@@ -3,19 +3,7 @@ const router = express.Router();
 const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
-
-// Normalise any Israeli phone number to E.164 (+972...).
-// Used to compare stored phone numbers against the Firebase phone_number JWT claim,
-// which Firebase ALWAYS returns in E.164 format regardless of how the OTP was requested.
-// This makes all ownership checks and phone lookups format-agnostic.
-function normalizePhone(phone) {
-  if (!phone) return '';
-  const digits = String(phone).replace(/[\s\-().]/g, '');
-  if (digits.startsWith('+')) return digits;          // already E.164
-  if (digits.startsWith('972')) return '+' + digits;  // 972501234567
-  if (digits.startsWith('0')) return '+972' + digits.slice(1); // 0501234567
-  return '+972' + digits;                             // bare digits
-}
+const { normalizePhone, phoneVariants } = require('../utils/phone');
 
 // Returns today's date as "YYYY-MM-DD" in Israel time
 function todayInIsrael() {
@@ -153,11 +141,8 @@ router.post('/clock-out', verifyToken, async (req, res) => {
 
   try {
     // Look up employee by JWT phone — the ground truth of who is authenticated.
-    // Build both E.164 and local "0..." variants so the query works regardless of
-    // how the phone was stored in Firestore.
-    const e164 = normalizePhone(phone);
-    const local = '0' + e164.replace(/^\+972/, '');
-    const variants = e164 === local ? [e164] : [e164, local];
+    // phoneVariants() covers both E.164 and local "0..." stored formats.
+    const variants = phoneVariants(phone);
 
     const empSnap = await db.collection('employees')
       .where('phone', 'in', variants)
@@ -230,15 +215,8 @@ router.get('/my', verifyToken, async (req, res) => {
     const phone = req.user.phone_number;
     if (!phone) return res.status(400).json({ error: 'מספר טלפון לא זמין' });
 
-    // Firebase always issues E.164 phone_number claims (+972...).
-    // Older records (e.g. manually created) may be stored as local "0..." format.
-    // Query both variants so lookup works regardless of storage format.
-    const e164 = normalizePhone(phone);
-    const local = '0' + e164.replace(/^\+972/, '');  // "+972XXXXXXXX" → "0XXXXXXXX"
-    const phoneVariants = e164 === local ? [e164] : [e164, local];
-
     const empSnap = await db.collection('employees')
-      .where('phone', 'in', phoneVariants)
+      .where('phone', 'in', phoneVariants(phone))
       .limit(1).get();
     if (empSnap.empty) return res.status(404).json({ error: 'עובד לא נמצא' });
     const employeeId = empSnap.docs[0].id;

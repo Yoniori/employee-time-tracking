@@ -6,30 +6,7 @@ const { db } = require('../firebase');
 const verifyToken = require('../middleware/verifyToken');
 const requireManager = require('../middleware/requireManager');
 const { writeAuditLog } = require('../utils/auditLog');
-
-// Normalise any Israeli phone number to E.164 (+972...).
-// All employee records are stored in this format so that the Firebase phone_number
-// JWT claim (always E.164) can be compared against Firestore data correctly.
-function normalizePhone(phone) {
-  if (!phone) return phone;
-  const digits = String(phone).replace(/[\s\-().]/g, '');
-  if (digits.startsWith('+')) return digits;           // already E.164
-  if (digits.startsWith('972')) return '+' + digits;   // 972501234567
-  if (digits.startsWith('0')) return '+972' + digits.slice(1); // 0501234567
-  return '+972' + digits;                              // bare local digits
-}
-
-// Validate that the normalised number looks like a real Israeli mobile number.
-// Israeli mobiles are +972 5X XXXXXXX — 9 digits after the country code, starting with 5.
-function validateIsraeliPhone(phone) {
-  if (!phone) return 'מספר טלפון הוא שדה חובה';
-  const e164 = normalizePhone(phone);
-  // +972 followed by exactly 9 digits starting with 5 (e.g. +972501234567)
-  if (!/^\+9725\d{8}$/.test(e164)) {
-    return 'מספר טלפון לא תקין — יש להזין מספר נייד ישראלי (לדוגמה: 0501234567 או +972501234567)';
-  }
-  return null; // valid
-}
+const { normalizePhone, validateIsraeliPhone } = require('../utils/phone');
 
 const upload = multer({
   storage: multer.memoryStorage(),
