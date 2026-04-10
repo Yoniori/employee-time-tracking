@@ -6,7 +6,9 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "seed": "node scripts/seedAdmin.js",
-    "test": "node --test tests/phone.test.js"
+    "test": "jest",
+    "test:phone": "node --test tests/phone.test.js",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -19,6 +21,8 @@
     "multer": "^1.4.5-lts.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "supertest": "^7.2.2"
   }
 }
